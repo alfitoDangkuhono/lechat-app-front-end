@@ -1,0 +1,102 @@
+import ChatIcon from '../../chat/components/ChatIcon'
+
+function SettingsPanel({
+  theme,
+  notificationsEnabled,
+  readReceiptsEnabled,
+  onThemeChange,
+  onNotificationsChange,
+  onReadReceiptsChange,
+  onClose,
+}) {
+  const isDark = theme === 'dark'
+
+  return (
+    <aside className="details-panel settings-panel" id="settings-panel" aria-label="Pengaturan aplikasi">
+      <div className="details-topline">
+        <span>PENGATURAN</span>
+        <button className="icon-button" type="button" aria-label="Tutup pengaturan" onClick={onClose}>
+          <ChatIcon name="close" size={18} />
+        </button>
+      </div>
+
+      <div className="settings-intro">
+        <span className="settings-intro-icon"><ChatIcon name="settings" size={20} /></span>
+        <h2>Atur ruang chat-mu.</h2>
+        <p>Sesuaikan tampilan agar nyaman untuk kamu.</p>
+      </div>
+
+      <section className="settings-section" aria-labelledby="appearance-heading">
+        <span className="profile-section-label" id="appearance-heading">TAMPILAN</span>
+        <div className="settings-option">
+          <span className={`settings-option-icon ${isDark ? 'settings-icon-dark' : 'settings-icon-light'}`}>
+            <ChatIcon name={isDark ? 'moon' : 'sun'} size={18} />
+          </span>
+          <span className="settings-option-copy">
+            <strong>Mode gelap</strong>
+            <small>{isDark ? 'Tampilan gelap aktif' : 'Gunakan tema gelap di dashboard'}</small>
+          </span>
+          <button
+            className="theme-switch"
+            type="button"
+            role="switch"
+            aria-checked={isDark}
+            aria-label="Mode gelap"
+            onClick={onThemeChange}
+          >
+            <span />
+          </button>
+        </div>
+        <div className="theme-preview" aria-hidden="true">
+          <div className={`theme-preview-card ${isDark ? 'preview-dark' : 'preview-light'}`}>
+            <span />
+            <i /><i /><i />
+          </div>
+          <span className="theme-preview-caption">{isDark ? 'Gelap' : 'Terang'} · tersimpan di perangkat ini</span>
+        </div>
+      </section>
+
+      <section className="settings-section settings-general" aria-labelledby="general-heading">
+        <span className="profile-section-label" id="general-heading">UMUM</span>
+        <div className="settings-option settings-option-static">
+          <span className="settings-option-icon settings-icon-light"><ChatIcon name="bell" size={18} /></span>
+          <span className="settings-option-copy">
+            <strong>Notifikasi aplikasi</strong>
+            <small>Preferensi disimpan di browser ini</small>
+          </span>
+          <button
+            className="theme-switch"
+            type="button"
+            role="switch"
+            aria-checked={notificationsEnabled}
+            aria-label="Notifikasi aplikasi"
+            onClick={onNotificationsChange}
+          >
+            <span />
+          </button>
+        </div>
+        <div className="settings-option settings-option-static">
+          <span className="settings-option-icon settings-icon-light"><ChatIcon name="lock" size={18} /></span>
+          <span className="settings-option-copy">
+            <strong>Tanda pesan terkirim</strong>
+            <small>Tampilkan centang di pesanmu</small>
+          </span>
+          <button
+            className="theme-switch"
+            type="button"
+            role="switch"
+            aria-checked={readReceiptsEnabled}
+            aria-label="Tanda pesan terkirim"
+            onClick={onReadReceiptsChange}
+          >
+            <span />
+          </button>
+        </div>
+      </section>
+
+      <p className="profile-demo-note">Preferensi disimpan secara lokal. Notifikasi push dan kontrol privasi akun memerlukan layanan backend.</p>
+    </aside>
+  )
+}
+
+export default SettingsPanel
