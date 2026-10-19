@@ -1,6 +1,26 @@
+import { useState } from 'react'
 import ChatIcon from '../../chat/components/ChatIcon'
 
-function PersonalProfile({ onClose }) {
+function PersonalProfile({ onClose, onLogout }) {
+  const [logoutError, setLogoutError] = useState('')
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  async function handleLogout() {
+    setLogoutError('')
+    setIsLoggingOut(true)
+
+    try {
+      await onLogout()
+    } catch (error) {
+      setLogoutError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Logout gagal. Silakan coba lagi.',
+      )
+      setIsLoggingOut(false)
+    }
+  }
+
   return (
     <aside className="details-panel personal-profile-panel" id="personal-profile-panel" aria-label="Profil pribadi">
       <div className="details-topline">
@@ -49,6 +69,16 @@ function PersonalProfile({ onClose }) {
       </div>
 
       <p className="profile-demo-note">Informasi profil ini hanya contoh tampilan dan belum tersimpan ke akun.</p>
+      {logoutError && <p className="login-error" role="alert">{logoutError}</p>}
+      <button
+        className="profile-logout-button"
+        type="button"
+        onClick={handleLogout}
+        disabled={isLoggingOut}
+        aria-busy={isLoggingOut}
+      >
+        {isLoggingOut ? 'Logging out...' : 'Log out'}
+      </button>
     </aside>
   )
 }

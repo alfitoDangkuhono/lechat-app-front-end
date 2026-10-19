@@ -7,7 +7,7 @@ import { SettingsPanel, useChatPreferences, useTheme } from '../../settings'
 import { chatService } from '../services/chatService'
 import '../../../App.css'
 
-function Dashboard() {
+function Dashboard({ onLogout }) {
   const [chats, setChats] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -230,7 +230,10 @@ function Dashboard() {
               onCall={() => showNotice('Fitur panggilan belum terhubung ke layanan.')}
             />
           ) : activeSidePanel === 'profile' ? (
-            <PersonalProfile onClose={() => setActiveSidePanel(null)} />
+            <PersonalProfile
+              onClose={() => setActiveSidePanel(null)}
+              onLogout={onLogout}
+            />
           ) : (
             <SettingsPanel
               theme={theme}

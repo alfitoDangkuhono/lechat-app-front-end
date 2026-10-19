@@ -966,6 +966,11 @@
 .details-topline > span { font-size: 9px; }
 .details-topline .icon-button { width: 30px; height: 30px; }
 
+.app-shell.side-panel-open .personal-profile-panel {
+  display: flex;
+  flex-direction: column;
+}
+
 .contact-card {
   display: flex;
   flex-direction: column;
@@ -1254,6 +1259,30 @@
   font-size: 8px;
   line-height: 1.6;
   text-align: center;
+}
+
+.profile-logout-button {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  width: 100%;
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: 10px 12px;
+  color: #a14f48;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  background: #fbf1ef;
+  border: 1px solid #f0dedb;
+  border-radius: 8px;
+  box-shadow: 0 -8px 14px #fcfcfb;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.profile-logout-button:hover {
+  background: #f6e6e3;
+  border-color: #e9cbc6;
 }
 
 .settings-intro {
@@ -1571,6 +1600,9 @@
 .app-shell[data-theme="dark"] .file-icon { background: #44332f; }
 .app-shell[data-theme="dark"] .side-panel-backdrop { background: rgba(4, 8, 5, 0.58); }
 .app-shell[data-theme="dark"] .personal-profile-avatar { border-color: #303930; box-shadow: 0 0 0 1px #414a40; }
+.app-shell[data-theme="dark"] .profile-logout-button { color: #e3a49c; background: #3d2d2b; border-color: #59403d; }
+.app-shell[data-theme="dark"] .profile-logout-button:hover { background: #4b3431; border-color: #704943; }
+.app-shell[data-theme="dark"] .profile-logout-button { box-shadow: 0 -8px 14px #242c25; }
 .app-shell[data-theme="dark"] .profile-account-badge { color: #b6cfb7; background: #303b31; }
 .app-shell[data-theme="dark"] .profile-presence { color: #a7b2a5; }
 .app-shell[data-theme="dark"] .settings-icon-dark { color: #bdc6e5; background: #34394a; }

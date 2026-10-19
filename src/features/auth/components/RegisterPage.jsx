@@ -128,18 +128,18 @@ function RegisterPage({ onLogin, onRegister }) {
         <label className="remember-option terms-option">
           <input type="checkbox" name="terms" onChange={clearFormError} required />
           <span className="custom-checkbox" aria-hidden="true" />
-          <span>Saya memahami bahwa ini adalah pendaftaran demo.</span>
+          <span>Saya setuju untuk membuat akun Lechat.</span>
         </label>
 
         {formError && <p className="login-error" role="alert">{formError}</p>}
         <button className="login-submit" type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
-          {isSubmitting ? 'Menyiapkan akun...' : 'Buat akun'}
+          {isSubmitting ? 'Membuat akun...' : 'Buat akun'}
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12h14m-6-6 6 6-6 6" />
           </svg>
         </button>
       </form>
-      <p className="login-demo-note"><span>i</span> Registrasi demo tidak menyimpan data atau membuat akun sungguhan.</p>
+      <p className="login-demo-note"><span>i</span> Data pendaftaran akan dikirim ke server untuk membuat akun.</p>
       <p className="auth-switch">Sudah punya akun? <button type="button" onClick={onLogin}>Masuk</button></p>
     </AuthLayout>
   )

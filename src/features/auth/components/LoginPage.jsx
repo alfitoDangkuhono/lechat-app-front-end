@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import AuthLayout from './AuthLayout'
 import usePasswordVisibility from '../hooks/usePasswordVisibility'
-import { authenticateDemo, demoCredentials } from '../services/authService'
 
 function LoginPage({ onLogin, onRegister }) {
   const { isVisible: showPassword, toggleVisibility: togglePasswordVisibility } = usePasswordVisibility()
@@ -9,23 +8,24 @@ function LoginPage({ onLogin, onRegister }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
+    setLoginError('')
+    setIsSubmitting(true)
 
-    if (!authenticateDemo(email, password)) {
-      setLoginError('Email atau kata sandi belum sesuai dengan akun demo.')
-      return
+    try {
+      await onLogin({ email: email.trim(), password })
+    } catch (error) {
+      setLoginError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Login gagal. Silakan coba lagi.',
+      )
+    } finally {
+      setIsSubmitting(false)
     }
-
-    setLoginError('')
-    onLogin()
-  }
-
-  function fillDemoCredentials() {
-    setEmail(demoCredentials.email)
-    setPassword(demoCredentials.password)
-    setLoginError('')
   }
 
   return (
@@ -108,8 +108,8 @@ function LoginPage({ onLogin, onRegister }) {
           <span>Ingat saya</span>
         </label>
 
-        <button className="login-submit" type="submit">
-          Masuk ke Lechat
+        <button className="login-submit" type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
+          {isSubmitting ? 'Memeriksa akun...' : 'Masuk ke Lechat'}
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12h14m-6-6 6 6-6 6" />
           </svg>
@@ -117,15 +117,7 @@ function LoginPage({ onLogin, onRegister }) {
       </form>
 
       {loginError && <p className="login-error" role="alert">{loginError}</p>}
-      <div className="demo-credentials">
-        <div className="demo-credentials-copy">
-          <span className="demo-credentials-label">KREDENSIAL DEMO</span>
-          <span><strong>Email</strong><code>{demoCredentials.email}</code></span>
-          <span><strong>Kata sandi</strong><code>{demoCredentials.password}</code></span>
-        </div>
-        <button type="button" onClick={fillDemoCredentials}>Gunakan</button>
-      </div>
-      <p className="login-demo-note"><span>i</span> Akun simulasi untuk preview UI, bukan autentikasi produksi.</p>
+      <p className="login-demo-note"><span>i</span> Masuk menggunakan akun Lechat Anda.</p>
       <p className="auth-switch">Belum punya akun? <button type="button" onClick={onRegister}>Daftar sekarang</button></p>
     </AuthLayout>
   )

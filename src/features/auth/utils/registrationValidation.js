@@ -18,16 +18,17 @@ export function validateRegistration({ name, email, password, confirmation, term
   }
 
   if (!termsAccepted) {
-    return 'Persetujuan pendaftaran demo wajib dicentang.'
+    return 'Persetujuan pendaftaran wajib dicentang.'
   }
 
   return ''
 }
 
-export function normalizeRegistrationData({ name, email, password }) {
+export function normalizeRegistrationData({ name, email, password, confirmation }) {
   return {
     name: name.trim(),
     email: email.trim().toLowerCase(),
     password,
+    password_confirmation: confirmation,
   }
 }
