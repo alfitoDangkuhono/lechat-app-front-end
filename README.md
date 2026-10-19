@@ -1,6 +1,6 @@
 # Lechat
 
-Template antarmuka aplikasi chatting yang dibuat dengan React dan Vite. UI mencakup autentikasi demo, navigasi, daftar percakapan dan kontak, area pesan, composer, arsip, profil, serta pengaturan. Fitur chat menggunakan service async dengan adapter data demo lokal; aplikasi belum terhubung ke API atau layanan real-time.
+Template antarmuka aplikasi chatting yang dibuat dengan React dan Vite. UI mencakup autentikasi demo, pendaftaran akun ke API, navigasi, daftar percakapan dan kontak, area pesan, composer, arsip, profil, serta pengaturan. Fitur chat menggunakan service async dengan adapter data demo lokal; belum terhubung ke API chat.
 
 ## Menjalankan proyek
 
@@ -19,20 +19,38 @@ npm run build
 npm run preview
 ```
 
+## Koneksi WebSocket Reverb
+
+Salin `.env.example` menjadi `.env.local`. Set `VITE_API_BASE_URL` ke origin backend (contoh `http://127.0.0.1:4000`); jika kosong, aplikasi menggunakan default tersebut. Form register mengirim `POST /api/v1/register` dengan JSON `{ name, email, password, password_confirmation }`, sedangkan login mengirim `POST /api/v1/login` dengan `{ email, password }`. Token pada response sukses disimpan sebagai cookie sesi `auth_token`. Saat aplikasi dibuka dengan cookie token, token dikirim melalui `POST /api/v1/is-login` dengan JSON `{ token }` untuk memulihkan sesi. Logout mengirim `POST /api/v1/logout` dengan header `Authorization: Bearer <token>` dan `Accept: application/json` tanpa token di body, lalu menghapus cookie bila request berhasil. Cookie memakai `SameSite=Lax` dan `Secure` saat memakai HTTPS. Cookie yang ditulis dari JavaScript tidak dapat menggunakan atribut `HttpOnly`; untuk perlindungan yang lebih kuat, backend sebaiknya mengatur token sebagai cookie `HttpOnly`. Backend harus mengizinkan CORS dari origin frontend bila berbeda. Jalankan ulang Vite setelah mengubah file environment.
+
+Service WebSocket tersedia melalui `connectWebSocket()` dan `disconnectWebSocket()` dari feature chat. Isi `VITE_REVERB_APP_KEY` dengan app key Reverb Anda. Host dan port default mengarah ke `127.0.0.1:18081`; nilainya dapat diubah lewat `VITE_REVERB_HOST` dan `VITE_REVERB_PORT`.
+
+```js
+import { connectWebSocket } from './features/chat'
+
+const echo = connectWebSocket()
+echo.channel('nama-channel').listen('NamaEvent', (event) => {
+  console.log(event)
+})
+```
+
+App secret Reverb tidak diperlukan di browser dan jangan ditaruh di variabel `VITE_*`, karena variabel tersebut diekspos ke client. UI chat saat ini masih menggunakan data demo lokal; koneksi WebSocket ini belum mengubah alur pengiriman pesan.
+
 ## Alur penggunaan UI
 
-1. **Masuk** — gunakan akun demo `demo@lechat.app` dengan kata sandi `lechat123`, lalu tekan **Masuk ke Lechat**. Tombol **Gunakan** mengisi kedua kolom secara otomatis. Hanya pasangan tersebut yang membuka dashboard; kredensial diperiksa di sisi browser dan tidak dikirim ke server.
-2. **Kredensial tidak cocok** — form menampilkan pesan kesalahan dan tetap berada di halaman login.
+1. **Masuk** — masukkan email dan kata sandi akun, lalu tekan **Masuk ke Lechat**. Form mengirim `POST /api/v1/login`; jika berhasil, token disimpan dalam cookie sesi dan dashboard dibuka. Saat aplikasi dimuat kembali, cookie diverifikasi melalui `POST /api/v1/is-login`.
+2. **Kredensial tidak cocok** — pesan error dari server ditampilkan dan aplikasi tetap berada di halaman login.
 3. **Berpindah ke registrasi** — pilih **Daftar sekarang** pada halaman login untuk membuka form pendaftaran.
-4. **Mendaftar (demo)** — isi nama, email, kata sandi minimal 8 karakter, konfirmasi kata sandi yang sama, dan centang persetujuan demo. Form memvalidasi dan merapikan nama/email, lalu meneruskan `{ name, email, password }` melalui callback registrasi. Saat ini callback hanya membuka dashboard; belum ada permintaan endpoint maupun penyimpanan akun.
+4. **Mendaftar** — isi nama, email, kata sandi minimal 8 karakter, konfirmasi kata sandi yang sama, dan centang persetujuan pendaftaran. Form memvalidasi dan merapikan nama/email, lalu mengirim `{ name, email, password, password_confirmation }` ke `POST /api/v1/register`. Jika server berhasil, dashboard dibuka; pesan validasi atau kegagalan server ditampilkan pada form.
 5. **Kembali ke login** — pilih **Masuk** pada halaman registrasi.
 6. **Mengelola kata sandi di form login** — opsi **Ingat saya** dapat dipilih dan tombol ikon mata menampilkan atau menyembunyikan kata sandi. Tautan lupa kata sandi menampilkan informasi bahwa pemulihan akun belum tersedia.
-7. **Melihat percakapan** — daftar percakapan ditampilkan di panel kiri bersama avatar, cuplikan pesan terakhir, waktu, dan indikator pesan belum dibaca.
-8. **Mencari percakapan** — ketik nama kontak atau cuplikan pesan pada kolom pencarian. Daftar akan disaring langsung.
-9. **Melihat kontak** — pilih ikon Kontak di navigasi desktop atau tab **Kontak** pada daftar mobile. Daftar menampilkan kontak personal, status online, dan pencarian.
-10. **Membuka chat dari kontak** — pilih kontak untuk membuka percakapan yang terkait.
-11. **Memfilter pesan** — pilih **Semua** atau **Belum dibaca**. Angka pada filter belum dibaca mengikuti jumlah percakapan yang masih memiliki pesan belum dibaca.
-12. **Membuka percakapan** — pilih item pada daftar. Percakapan tersebut menjadi aktif dan penghitung belum dibacanya direset.
+7. **Keluar** — buka profil pribadi dari navigasi, lalu pilih **Log out**. Token sesi dihapus dari cookie dan aplikasi kembali ke halaman login.
+8. **Melihat percakapan** — daftar percakapan ditampilkan di panel kiri bersama avatar, cuplikan pesan terakhir, waktu, dan indikator pesan belum dibaca.
+9. **Mencari percakapan** — ketik nama kontak atau cuplikan pesan pada kolom pencarian. Daftar akan disaring langsung.
+10. **Melihat kontak** — pilih ikon Kontak di navigasi desktop atau tab **Kontak** pada daftar mobile. Daftar menampilkan kontak personal, status online, dan pencarian.
+11. **Membuka chat dari kontak** — pilih kontak untuk membuka percakapan yang terkait.
+12. **Memfilter pesan** — pilih **Semua** atau **Belum dibaca**. Angka pada filter belum dibaca mengikuti jumlah percakapan yang masih memiliki pesan belum dibaca.
+13. **Membuka percakapan** — pilih item pada daftar. Percakapan tersebut menjadi aktif dan penghitung belum dibacanya direset.
 13. **Mengirim pesan** — ketik pesan di bagian bawah area chat lalu tekan **Enter** atau tombol kirim. Pesan muncul di percakapan aktif dan cuplikan percakapan ikut diperbarui.
 14. **Melihat detail** — pada layar lebar, panel kanan menampilkan status kontak, tombol telepon/video, media bersama, file contoh, dan catatan privasi.
 15. **Menggunakan layar kecil** — panel daftar percakapan disembunyikan saat chat aktif. Tombol kembali di header membuka daftar, dengan tab untuk berpindah antara pesan, kontak, dan arsip.
@@ -138,19 +156,19 @@ flowchart TD
 2. Komponen UI merender state dan menyampaikan aksi lewat props. `Dashboard` menjadi pemilik state layar chat serta koordinator pemanggilan service; komponen tidak mengakses `chatData` secara langsung.
 3. Service menyediakan batas akses data yang asinkron. `chatService` saat ini mengimplementasikan kontrak dengan data dalam memori, sedangkan `settingsService` membaca/menyimpan preferensi ke `localStorage`.
 4. Barrel `index.js` adalah API publik sebuah feature. Gunakan barrel untuk impor lintas feature; impor komponen internal langsung hanya di dalam feature yang sama. Komponen yang benar-benar dipakai lintas feature dapat dipindahkan ke `src/components/` agar arah dependensi antar-feature tetap sederhana.
-5. Belum ada backend, autentikasi server, database, atau real-time transport. Adaptasi backend dilakukan dengan mengganti implementasi service sambil mempertahankan kontrak fungsi dan bentuk data yang dipakai UI. Persistensi chat, unggah lampiran, panggilan, dan notifikasi push berada di luar cakupan adapter demo.
+5. Integrasi backend saat ini hanya mencakup pendaftaran akun. Login, database chat, dan real-time transport belum terhubung. Adaptasi backend dilakukan lewat service sambil mempertahankan kontrak fungsi dan bentuk data yang dipakai UI. Persistensi chat, unggah lampiran, panggilan, dan notifikasi push berada di luar cakupan adapter demo.
 
 **Alur data chat:** `Dashboard` meminta daftar ke `chatService` → hasilnya disimpan sebagai state UI → daftar diturunkan melalui pencarian/filter → aksi pilih/kirim/arsip memanggil service → service mengembalikan data percakapan yang diperbarui → dashboard memperbarui state untuk dirender kembali.
 
 ### 5. Komponen login
 
-`src/features/auth/components/AuthLayout.jsx` menyediakan layout bersama untuk layar autentikasi. `src/features/auth/components/LoginPage.jsx` merender form login, kredensial demo, kontrol tampil/sembunyikan kata sandi, opsi ingat saya, dan validasi kredensial lokal. Pasangan `demo@lechat.app` / `lechat123` membuka dashboard. `src/features/auth/components/RegisterPage.jsx` merender form pendaftaran dengan validasi input wajib, panjang kata sandi, kesesuaian konfirmasi, dan persetujuan demo. Form valid membuka dashboard sebagai simulasi, tanpa membuat atau menyimpan akun sungguhan.
+`src/features/auth/components/AuthLayout.jsx` menyediakan layout bersama untuk layar autentikasi. `src/features/auth/components/LoginPage.jsx` merender form login, kontrol tampil/sembunyikan kata sandi, dan opsi ingat saya; login menggunakan service `loginUser()` untuk mengirim kredensial ke endpoint backend. `src/features/auth/components/RegisterPage.jsx` merender form pendaftaran dengan validasi input wajib, panjang kata sandi, kesesuaian konfirmasi, dan persetujuan. Pendaftaran menggunakan service `registerUser()` untuk mengirim data ke endpoint backend.
 
 Logika autentikasi dipisahkan lagi ke dalam folder peran:
 
 - `src/features/auth/hooks/usePasswordVisibility.js` membagikan perilaku tampil/sembunyikan kata sandi di form login dan registrasi.
-- `src/features/auth/services/authService.js` menjadi batas layanan untuk validasi kredensial akun demo. Layanan ini lokal dan bukan pengganti autentikasi backend.
-- `src/features/auth/utils/registrationValidation.js` memvalidasi input registrasi dan menormalisasi data sebelum dikirim ke callback, sebagai batas integrasi untuk endpoint mendatang.
+- `src/features/auth/services/authService.js` menyediakan request login ke `POST /api/v1/login`, validasi sesi lewat `POST /api/v1/is-login`, dan registrasi ke `POST /api/v1/register`; token respons disimpan sebagai cookie melalui `authTokenService.js`.
+- `src/features/auth/utils/registrationValidation.js` memvalidasi input registrasi dan menormalisasi data sebelum dikirim ke service.
 - `src/features/auth/utils/passwordValidation.js` memuat helper validasi kata sandi sederhana.
 
 ### 6. Styling dan responsivitas
@@ -167,8 +185,7 @@ Jalankan `npm run lint` untuk pemeriksaan ESLint dan `npm run build` untuk memas
 ## Batasan template saat ini
 
 - Percakapan dan pesan dikelola melalui service adapter dalam memori; data kembali ke contoh awal setelah halaman dimuat ulang.
-- Form login hanya mencocokkan kredensial contoh di sisi browser; belum terhubung ke autentikasi backend, pemulihan akun, atau penyimpanan sesi.
-- Form registrasi hanya simulasi UI; akun yang diisi tidak dibuat atau disimpan.
+- Form login dan registrasi menggunakan endpoint backend dan konfigurasi `VITE_API_BASE_URL`. Pemulihan kata sandi belum tersedia; permintaan verifikasi sesi harus berhasil agar sesi dipulihkan.
 - Lampiran dan emoji dapat dipilih di UI, tetapi tidak diunggah atau disinkronkan. Media dan file di detail kontak masih berupa contoh.
 - Panggilan suara/video dan notifikasi push belum terhubung ke layanan eksternal.
-- Tidak ada autentikasi backend, persistensi percakapan/pesan, atau sinkronisasi real-time.
+- Login belum menggunakan autentikasi backend; persistensi percakapan/pesan dan sinkronisasi real-time juga belum tersedia.
