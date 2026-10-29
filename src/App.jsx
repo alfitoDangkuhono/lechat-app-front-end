@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 import AuthLayout from './features/auth/components/AuthLayout'
 import { LoginPage, RegisterPage } from './features/auth'
-import { checkLogin, loginUser, logoutUser, registerUser } from './features/auth/services/authService'
-import { clearAuthToken, getAuthToken } from './features/auth/services/authTokenService'
+import {
+  checkLogin,
+  loginUser,
+  logoutUser,
+  refreshAuthToken,
+  registerUser,
+} from './features/auth/services/authService'
+import { clearAuthTokens, getAuthToken } from './features/auth/services/authTokenService'
 import { Dashboard } from './features/chat'
 
 function App() {
@@ -47,6 +53,19 @@ function App() {
 
   async function handleLogin(credentials) {
     await loginUser(credentials)
+
+    try {
+      await refreshAuthToken()
+    } catch (error) {
+      const message = error?.response?.data?.message
+      throw new Error(
+        typeof message === 'string' && message
+          ? message
+          : 'Token autentikasi gagal diperbarui. Silakan coba lagi.',
+        { cause: error },
+      )
+    }
+
     setAuthStatus('authenticated')
   }
 
@@ -98,7 +117,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              clearAuthToken()
+              clearAuthTokens()
               setSessionCheckError('')
               setAuthStatus('unauthenticated')
             }}

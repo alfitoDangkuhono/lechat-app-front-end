@@ -118,6 +118,19 @@ function Dashboard({ onLogout }) {
     }
   }
 
+  async function addContact(contactDetails) {
+    try {
+      const contact = await chatService.addContact(contactDetails)
+      setChats((current) => [contact, ...current])
+      setSearch('')
+      showNotice('Kontak berhasil ditambahkan.')
+      return true
+    } catch (error) {
+      showNotice(error.message || 'Kontak gagal ditambahkan.')
+      return false
+    }
+  }
+
   async function archiveChat(chatId) {
     const remainingChats = visibleChats.filter((chat) => chat.id !== chatId)
     try {
@@ -188,6 +201,7 @@ function Dashboard({ onLogout }) {
           setShowConversations(true)
         }}
         onNewChat={() => setIsNewChatOpen(true)}
+        onAddContact={addContact}
         onRetryLoad={retryLoadConversations}
         onRestoreChat={restoreChat}
         onClearFilter={() => {

@@ -15,6 +15,7 @@ function RegisterPage({ onLogin, onRegister }) {
     const registration = {
       name: formData.get('name'),
       email: formData.get('email'),
+      handphone: formData.get('handphone'),
       password: formData.get('password'),
       confirmation: formData.get('confirm-password'),
       termsAccepted: formData.get('terms') === 'on',
@@ -69,6 +70,14 @@ function RegisterPage({ onLogin, onRegister }) {
             <path d="m3 7 9 6 9-6" />
           </svg>
           <input id="register-email" name="email" type="email" placeholder="nama@email.com" autoComplete="email" onChange={clearFormError} required />
+        </div>
+
+        <label htmlFor="register-handphone">Handphone</label>
+        <div className="login-input-wrap">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7l.4 2.8a2 2 0 0 1-.6 1.7L7.6 9.5a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 1.7-.6l2.8.4a2 2 0 0 1 1.6 2.9Z" />
+          </svg>
+          <input id="register-handphone" name="handphone" type="tel" autoComplete="tel" inputMode="numeric" pattern="[0-9]+" title="Nomor handphone hanya boleh berisi angka." placeholder="Input your number phone" onChange={clearFormError} required />
         </div>
 
         <label htmlFor="register-password">Kata sandi</label>

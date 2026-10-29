@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { clearAuthToken } from '../features/auth/services/authTokenService'
+import { clearAuthTokens } from '../features/auth/services/authTokenService'
 
 const DEFAULT_API_BASE_URL = 'http://127.0.0.1:4000'
 
@@ -23,7 +23,7 @@ api.interceptors.response.use(
     const message = error.response?.data?.message
 
     if (typeof message === 'string' && message.trim().toLowerCase() === 'unauthenticated.') {
-      clearAuthToken()
+      clearAuthTokens()
     }
 
     return Promise.reject(error)

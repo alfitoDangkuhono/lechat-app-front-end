@@ -67,6 +67,42 @@ async function createConversation({ name, type = 'contact' }) {
   return { conversation: cloneConversation(conversation), created: true }
 }
 
+async function addContact({ username, fullName, phone, email }) {
+  const normalizedUsername = username.trim()
+  const normalizedName = fullName.trim()
+  const normalizedPhone = phone.trim()
+  const normalizedEmail = email.trim()
+
+  if (!normalizedUsername || !normalizedName || !normalizedPhone || !normalizedEmail) {
+    throw new Error('Semua data kontak wajib diisi.')
+  }
+  if (conversations.some((conversation) => (
+    conversation.username?.toLowerCase() === normalizedUsername.toLowerCase()
+  ))) {
+    throw new Error('Username tersebut sudah digunakan.')
+  }
+
+  const colorOptions = ['peach', 'violet', 'blue', 'green', 'yellow']
+  const contact = {
+    id: createId(),
+    name: normalizedName,
+    username: normalizedUsername,
+    phone: normalizedPhone,
+    email: normalizedEmail,
+    initials: normalizedName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+    color: colorOptions[conversations.length % colorOptions.length],
+    status: 'offline',
+    preview: 'Kontak baru',
+    time: '',
+    unread: 0,
+    archived: false,
+    messages: [],
+  }
+
+  conversations = [contact, ...conversations]
+  return cloneConversation(contact)
+}
+
 async function markConversationRead(conversationId) {
   const conversation = findConversation(conversationId)
   conversation.unread = 0
@@ -120,6 +156,7 @@ async function restoreConversation(conversationId) {
 export const chatService = {
   listConversations,
   createConversation,
+  addContact,
   markConversationRead,
   sendMessage,
   archiveConversation,

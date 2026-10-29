@@ -30,6 +30,92 @@
 .contacts-summary small { color: #999d95; font-size: 9px; }
 .contacts-search { margin-top: 14px; }
 
+.add-contact-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  color: #52735e;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  background: #edf2ed;
+  border: 1px solid #e3ebe2;
+  border-radius: 9px;
+}
+
+.add-contact-trigger:hover { background: #e5ede5; }
+
+.add-contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 13px;
+  background: #f8f9f7;
+  border: 1px solid #e9ece7;
+  border-radius: 11px;
+}
+
+.add-contact-title { color: #444940; font-size: 11px; }
+
+.add-contact-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #777c73;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.add-contact-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  color: #343831;
+  font: inherit;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid #e3e6df;
+  border-radius: 7px;
+}
+
+.add-contact-form input:focus {
+  outline: 2px solid #d7e3d7;
+  border-color: #8fa891;
+}
+
+.add-contact-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.add-contact-actions button {
+  padding: 7px 11px;
+  color: #70756c;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #e3e6df;
+  border-radius: 7px;
+}
+
+.add-contact-actions button[type="submit"] {
+  color: #fff;
+  background: #52735e;
+  border-color: #52735e;
+}
+
+.add-contact-actions button:hover { filter: brightness(0.97); }
+
 .contacts-section-heading {
   display: flex;
   align-items: center;
@@ -115,6 +201,16 @@
 .app-shell[data-theme="dark"] .contact-list-copy strong { color: #d2d9d0; }
 .app-shell[data-theme="dark"] .contacts-summary small,
 .app-shell[data-theme="dark"] .contacts-section-heading { color: #9ca69b; }
+.app-shell[data-theme="dark"] .add-contact-trigger { color: #c0d3c0; background: #2d392e; border-color: #3a483b; }
+.app-shell[data-theme="dark"] .add-contact-trigger:hover { background: #344235; }
+.app-shell[data-theme="dark"] .add-contact-form { background: #222a23; border-color: #3a433b; }
+.app-shell[data-theme="dark"] .add-contact-title,
+.app-shell[data-theme="dark"] .add-contact-form input { color: #d2d9d0; }
+.app-shell[data-theme="dark"] .add-contact-form label { color: #a6afa4; }
+.app-shell[data-theme="dark"] .add-contact-form input,
+.app-shell[data-theme="dark"] .add-contact-actions button { background: #1b211c; border-color: #414a42; }
+.app-shell[data-theme="dark"] .add-contact-actions button { color: #c1c8c0; }
+.app-shell[data-theme="dark"] .add-contact-actions button[type="submit"] { color: #fff; background: #52735e; border-color: #52735e; }
 .app-shell[data-theme="dark"] .contacts-section-heading > span:last-child { color: #b8d0b9; background: #2d392e; }
 .app-shell[data-theme="dark"] .contact-list-item:hover { background: #2a332b; }
 .app-shell[data-theme="dark"] .contact-list-copy small { color: #9ca69b; }

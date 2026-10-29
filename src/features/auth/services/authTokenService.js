@@ -1,16 +1,17 @@
 const AUTH_TOKEN_COOKIE = 'auth_token'
+const REFRESH_TOKEN_COOKIE = 'refresh_token'
 
-export function saveAuthToken(token) {
+function saveTokenCookie(cookieName, token, tokenType) {
   if (typeof token !== 'string' || !token) {
-    throw new Error('Token autentikasi tidak valid.')
+    throw new Error(`Token ${tokenType} tidak valid.`)
   }
 
   const secureAttribute = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${AUTH_TOKEN_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secureAttribute}`
+  document.cookie = `${cookieName}=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secureAttribute}`
 }
 
-export function getAuthToken() {
-  const cookiePrefix = `${AUTH_TOKEN_COOKIE}=`
+function getTokenCookie(cookieName) {
+  const cookiePrefix = `${cookieName}=`
   const tokenCookie = document.cookie
     .split(';')
     .map((cookie) => cookie.trim())
@@ -27,12 +28,41 @@ export function getAuthToken() {
       throw error
     }
 
-    clearAuthToken()
+    clearTokenCookie(cookieName)
     return null
   }
 }
 
-export function clearAuthToken() {
+function clearTokenCookie(cookieName) {
   const secureAttribute = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${AUTH_TOKEN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secureAttribute}`
+  document.cookie = `${cookieName}=; Path=/; Max-Age=0; SameSite=Lax${secureAttribute}`
+}
+
+export function saveAuthToken(token) {
+  saveTokenCookie(AUTH_TOKEN_COOKIE, token, 'autentikasi')
+}
+
+export function getAuthToken() {
+  return getTokenCookie(AUTH_TOKEN_COOKIE)
+}
+
+export function clearAuthToken() {
+  clearTokenCookie(AUTH_TOKEN_COOKIE)
+}
+
+export function saveRefreshToken(token) {
+  saveTokenCookie(REFRESH_TOKEN_COOKIE, token, 'refresh')
+}
+
+export function getRefreshToken() {
+  return getTokenCookie(REFRESH_TOKEN_COOKIE)
+}
+
+export function clearRefreshToken() {
+  clearTokenCookie(REFRESH_TOKEN_COOKIE)
+}
+
+export function clearAuthTokens() {
+  clearAuthToken()
+  clearRefreshToken()
 }

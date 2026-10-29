@@ -19,6 +19,7 @@ function ChatSidebar({
   onFilterChange,
   onViewChange,
   onNewChat,
+  onAddContact,
   onRetryLoad,
   onRestoreChat,
   onClearFilter,
@@ -178,6 +179,7 @@ function ChatSidebar({
             search={search}
             onSearchChange={onSearchChange}
             onSelectContact={onSelectChat}
+            onAddContact={onAddContact}
           />
         ) : activeView === 'archive' ? (
           <>
