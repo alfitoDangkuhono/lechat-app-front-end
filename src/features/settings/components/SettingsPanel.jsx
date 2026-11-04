@@ -4,9 +4,13 @@ function SettingsPanel({
   theme,
   notificationsEnabled,
   readReceiptsEnabled,
+  messageFontSize,
+  messageFontFamily,
   onThemeChange,
   onNotificationsChange,
   onReadReceiptsChange,
+  onMessageFontSizeChange,
+  onMessageFontFamilyChange,
   onClose,
 }) {
   const isDark = theme === 'dark'
@@ -53,6 +57,40 @@ function SettingsPanel({
             <i /><i /><i />
           </div>
           <span className="theme-preview-caption">{isDark ? 'Gelap' : 'Terang'} · tersimpan di perangkat ini</span>
+        </div>
+        <div className="settings-option settings-font-size-option">
+          <span className="settings-option-icon settings-icon-light settings-font-icon" aria-hidden="true">Aa</span>
+          <label className="settings-option-copy" htmlFor="message-font-size">
+            <strong>Ukuran teks chat</strong>
+            <small>Atur ukuran teks pesan dan kolom penulisan</small>
+          </label>
+          <select
+            id="message-font-size"
+            className="settings-font-size-select"
+            value={messageFontSize}
+            onChange={(event) => onMessageFontSizeChange(event.target.value)}
+          >
+            <option value="small">Kecil</option>
+            <option value="medium">Sedang</option>
+            <option value="large">Besar</option>
+          </select>
+        </div>
+        <div className="settings-option settings-font-size-option">
+          <span className="settings-option-icon settings-icon-light settings-font-icon" aria-hidden="true">Ag</span>
+          <label className="settings-option-copy" htmlFor="message-font-family">
+            <strong>Jenis font</strong>
+            <small>Pilih gaya tulisan untuk chat dan pengaturan</small>
+          </label>
+          <select
+            id="message-font-family"
+            className="settings-font-size-select"
+            value={messageFontFamily}
+            onChange={(event) => onMessageFontFamilyChange(event.target.value)}
+          >
+            <option value="system">Standar</option>
+            <option value="serif">Serif</option>
+            <option value="monospace">Monospace</option>
+          </select>
         </div>
       </section>
 

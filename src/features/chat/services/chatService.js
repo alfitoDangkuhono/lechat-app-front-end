@@ -220,6 +220,15 @@ export function mapMessage(message) {
         : 'them',
     }
     : null
+  const receiptStatus = message.receipt_status === 'read'
+    || message.read_at
+    || message.is_read === true
+    ? 'read'
+    : message.receipt_status === 'delivered'
+      || message.delivered_at
+      || message.is_delivered === true
+      ? 'delivered'
+      : 'sent'
 
   return {
     ...message,
@@ -229,6 +238,7 @@ export function mapMessage(message) {
     author: senderName,
     text: message.body ?? message.content ?? message.text ?? '',
     reply_to: replyTo,
+    receiptStatus,
     time: formatTime(message.created_at ?? message.time),
   }
 }

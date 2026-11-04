@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ChatAvatar from './ChatAvatar'
 import ChatHeader from './ChatHeader'
 import ChatIcon from './ChatIcon'
@@ -21,6 +21,7 @@ function ChatWindow({
   onSendMessage,
   hasOlderMessages,
   isLoadingOlder,
+  isLoadingMessages,
   onLoadOlder,
 }) {
   const [attachments, setAttachments] = useState([])
@@ -28,18 +29,36 @@ function ChatWindow({
   const [replyingTo, setReplyingTo] = useState(null)
   const [openMessageActionsId, setOpenMessageActionsId] = useState(null)
   const fileInputRef = useRef(null)
+  const chatContentRef = useRef(null)
   const messagesEndRef = useRef(null)
+  const loadingOlderRef = useRef(false)
+  const historyScrollAnchorRef = useRef(null)
+  const pendingInitialScrollRef = useRef(true)
   const messageGroups = groupMessagesByDate(chat?.messages ?? [])
   const previousMessagesRef = useRef({ count: chat?.messages?.length ?? 0, firstId: chat?.messages?.[0]?.id })
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const messages = chat?.messages ?? []
     const previous = previousMessagesRef.current
     const prependedMessages = previous.count > 0
       && messages.length > previous.count
       && messages[0]?.id !== previous.firstId
 
-    if (!prependedMessages) {
+    if (isLoadingMessages) {
+      pendingInitialScrollRef.current = true
+    } else if (pendingInitialScrollRef.current) {
+      const container = chatContentRef.current
+      if (container) container.scrollTop = container.scrollHeight
+      pendingInitialScrollRef.current = false
+      historyScrollAnchorRef.current = null
+    } else if (prependedMessages && historyScrollAnchorRef.current?.conversationId === chat?.id) {
+      const container = chatContentRef.current
+      if (container) {
+        const heightDifference = container.scrollHeight - historyScrollAnchorRef.current.scrollHeight
+        container.scrollTop = historyScrollAnchorRef.current.scrollTop + heightDifference
+      }
+      historyScrollAnchorRef.current = null
+    } else if (!prependedMessages) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
 
@@ -47,7 +66,14 @@ function ChatWindow({
       count: messages.length,
       firstId: messages[0]?.id,
     }
-  }, [chat?.messages])
+  }, [chat?.id, chat?.messages, isLoadingMessages])
+
+  useEffect(() => {
+    if (!isLoadingOlder) {
+      loadingOlderRef.current = false
+      historyScrollAnchorRef.current = null
+    }
+  }, [isLoadingOlder])
 
   if (!chat) {
     return (
@@ -56,6 +82,31 @@ function ChatWindow({
         <p>Pilih percakapan untuk mulai mengirim pesan, atau buat percakapan baru.</p>
       </section>
     )
+  }
+
+  function handleChatScroll(event) {
+    const container = event.currentTarget
+    if (
+      container.scrollTop > 24
+      || !hasOlderMessages
+      || isLoadingOlder
+      || isLoadingMessages
+      || loadingOlderRef.current
+    ) {
+      return
+    }
+
+    loadingOlderRef.current = true
+    historyScrollAnchorRef.current = {
+      conversationId: chat.id,
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+    }
+    Promise.resolve(onLoadOlder()).catch((error) => {
+      onNotice(error.message || 'Riwayat pesan lama gagal dimuat.')
+      loadingOlderRef.current = false
+      historyScrollAnchorRef.current = null
+    })
   }
 
   async function handleSubmit(event) {
@@ -95,16 +146,12 @@ function ChatWindow({
         profileInitials={profileInitials}
       />
 
-      <div className="chat-content">
-        {hasOlderMessages && (
-          <button
-            className="text-button"
-            type="button"
-            onClick={onLoadOlder}
-            disabled={isLoadingOlder}
-          >
-            {isLoadingOlder ? 'Memuat pesan...' : 'Muat pesan sebelumnya'}
-          </button>
+      <div className="chat-content" ref={chatContentRef} onScroll={handleChatScroll}>
+        {(isLoadingOlder || isLoadingMessages) && (
+          <div className="chat-history-loading" role="status" aria-live="polite">
+            <span className="chat-history-spinner" aria-hidden="true" />
+            <span>Memuat pesan sebelumnya...</span>
+          </div>
         )}
         <div className="message-list">
           {messageGroups.map((group) => (
@@ -153,6 +200,15 @@ function ChatWindow({
                     )}
                   </span>
                 )
+                const senderAvatar = chat.status === 'group'
+                  ? messageSenderAvatar(chat, item, groupMembers)
+                  : null
+                const bubbleColor = item.from === 'me'
+                  ? ''
+                  : senderAvatar?.color ?? chat.color
+                const bubbleColorClass = bubbleColor
+                  ? ` message-bubble-user-${bubbleColor}`
+                  : ''
 
                 return (
                   <div
@@ -161,43 +217,47 @@ function ChatWindow({
                   >
                     {item.from === 'them' && (
                       <ChatAvatar
-                        chat={chat.status === 'group'
-                          ? messageSenderAvatar(chat, item, groupMembers)
-                          : chat}
+                        chat={senderAvatar ?? chat}
                         small
                       />
                     )}
-                  <div className="message-body">
-                    {item.author && <span className="message-author">{item.author}</span>}
-                    {(item.text || item.reply_to || item.attachments?.length > 0) && (
-                      <div className="message-bubble">
-                        <div className="message-bubble-content">
-                        {item.reply_to && (
-                          <div className="message-reply-quote">
-                            <strong>{getReplySender(item.reply_to, chat)}</strong>
-                            <span>{getReplyText(item.reply_to)}</span>
+                    <div className="message-body">
+                      {(item.text || item.reply_to || item.attachments?.length > 0) && (
+                        <div className={`message-bubble${bubbleColorClass}`}>
+                          {chat.status === 'group'
+                            && item.from === 'them'
+                            && senderAvatar?.username && (
+                              <span className="message-author">{senderAvatar.username}</span>
+                          )}
+                          <div className="message-bubble-content">
+                            {item.reply_to && (
+                              <div className="message-reply-quote">
+                                <strong>{getReplySender(item.reply_to, chat)}</strong>
+                                <span>{getReplyText(item.reply_to)}</span>
+                              </div>
+                            )}
+                            {item.text && <div className="message-text-line">{item.text}</div>}
+                            {item.attachments?.map((file) => (
+                              <div className="message-attachment" key={`${item.id}-${file.name}-${file.size}`}>
+                                <ChatIcon name="paperclip" size={15} />
+                                <span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                        {item.text && (
-                          <div className="message-text-line">
-                            {item.text}
-                          </div>
-                        )}
-                        {item.attachments?.map((file) => (
-                          <div className="message-attachment" key={`${item.id}-${file.name}-${file.size}`}>
-                            <ChatIcon name="paperclip" size={15} />
-                            <span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span>
-                          </div>
-                        ))}
+                          {messageActions}
                         </div>
-                        {messageActions}
+                      )}
+                      <div className="message-meta">
+                        <time>{item.time}</time>
+                        {item.from === 'me' && readReceiptsEnabled && (
+                          item.receiptStatus === 'read'
+                            ? <ChatIcon name="check-double" size={16} className="read-check read-check-read" />
+                            : item.receiptStatus === 'delivered'
+                              ? <ChatIcon name="check-double" size={16} className="read-check read-check-delivered" />
+                              : <ChatIcon name="check" size={14} className="read-check" />
+                        )}
                       </div>
-                    )}
-                    <div className="message-meta">
-                      <time>{item.time}</time>
-                      {item.from === 'me' && readReceiptsEnabled && <ChatIcon name="check" size={14} className="read-check" />}
                     </div>
-                  </div>
                   </div>
                 )
               })}
@@ -370,6 +430,8 @@ function messageSenderAvatar(chat, message, groupMembers) {
 
   return {
     ...chat,
+    username: username
+      || (typeof message.author === 'string' ? message.author.trim() : ''),
     initials: username ? [...username].slice(0, 2).join('').toUpperCase() : '',
     color: colorOptions[colorIndex],
   }

@@ -18,20 +18,45 @@ import '../../../App.css'
 
 function mergeMessages(current, incoming) {
   const index = current.findIndex((item) => (
-    String(item.id) === String(incoming.id)
+    (
+      item.id !== undefined
+      && item.id !== null
+      && incoming.id !== undefined
+      && incoming.id !== null
+      && String(item.id) === String(incoming.id)
+    )
     || (
       item.client_message_id
       && item.client_message_id === incoming.client_message_id
     )
   ))
   if (index < 0) return [...current, incoming]
-  return current.map((item, itemIndex) => itemIndex === index
-    ? { ...item, ...incoming }
-    : item)
+  return current.map((item, itemIndex) => {
+    if (itemIndex !== index) return item
+
+    const isPending = item.pending === true && incoming.pending === true
+    const merged = incoming.pending === true && item.pending !== true
+      ? { ...incoming, ...item }
+      : { ...item, ...incoming }
+    return { ...merged, pending: isPending }
+  })
 }
 
 function mergeMessageLists(primary, secondary) {
   return secondary.reduce((messages, item) => mergeMessages(messages, item), primary)
+}
+
+function updateOutgoingReceipt(messages, throughMessageId, receiptStatus) {
+  const cursorIndex = messages.findIndex((item) => String(item.id) === String(throughMessageId))
+  if (cursorIndex < 0) return messages
+
+  const statusRank = { sent: 0, delivered: 1, read: 2 }
+  return messages.map((item, index) => {
+    if (index > cursorIndex || item.from !== 'me') return item
+    const currentStatus = item.receiptStatus ?? 'sent'
+    if (statusRank[currentStatus] >= statusRank[receiptStatus]) return item
+    return { ...item, receiptStatus }
+  })
 }
 
 async function playNotificationSound(audioContext) {
@@ -78,7 +103,8 @@ function Dashboard({ onLogout }) {
   const [loadError, setLoadError] = useState('')
   const [socketStatus, setSocketStatus] = useState('disconnected')
   const [pagination, setPagination] = useState({})
-  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  const [loadingOlderChatIds, setLoadingOlderChatIds] = useState(() => new Set())
+  const [loadingHistoryChatId, setLoadingHistoryChatId] = useState(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('Semua')
   const [message, setMessage] = useState('')
@@ -97,16 +123,25 @@ function Dashboard({ onLogout }) {
   const notificationAudioRef = useRef(null)
   const pendingMessagesRef = useRef(new Map())
   const notifiedMessagesRef = useRef(new Set())
+  const loadingOlderChatIdsRef = useRef(new Set())
   const showConversationsRef = useRef(showConversations)
   const { theme, toggleTheme } = useTheme()
   const {
     notificationsEnabled,
     readReceiptsEnabled,
+    messageFontSize,
+    messageFontFamily,
     toggleNotifications,
     toggleReadReceipts,
+    setMessageFontSize,
+    setMessageFontFamily,
   } = useChatPreferences()
   const notificationsEnabledRef = useRef(notificationsEnabled)
   const activeChat = chats.find((chat) => chat.id === activeId)
+  const isLoadingOlder = activeId !== null
+    && loadingOlderChatIds.has(String(activeId))
+  const isLoadingChatHistory = activeId !== null
+    && String(loadingHistoryChatId) === String(activeId)
   const visibleChats = chats.filter((chat) => !chat.archived)
   const archivedChats = chats.filter((chat) => chat.archived)
   const currentProfileInitials = profileInitials(userProfile)
@@ -426,6 +461,32 @@ function Dashboard({ onLogout }) {
           return
         }
 
+        if (event.type === 'receipt.read' || event.type === 'receipt.delivered') {
+          const receipt = event.data?.receipt ?? event.data ?? {}
+          const receiptConversationId = event.conversation_id
+            ?? receipt.conversation_id
+            ?? activeId
+          const throughMessageId = receipt.through_message_id
+            ?? receipt.message_id
+            ?? event.through_message_id
+          if (receiptConversationId === null || !throughMessageId) return
+
+          const receiptStatus = event.type === 'receipt.read' ? 'read' : 'delivered'
+          setChats((current) => current.map((chat) => (
+            String(chat.id) === String(receiptConversationId)
+              ? {
+                ...chat,
+                messages: updateOutgoingReceipt(
+                  chat.messages,
+                  throughMessageId,
+                  receiptStatus,
+                ),
+              }
+              : chat
+          )))
+          return
+        }
+
         if (event.type === 'message.created' || event.type === 'message.updated') {
           const rawMessage = event.data?.message ?? event.data
           if (!rawMessage || eventConversationId === null) return
@@ -534,6 +595,9 @@ function Dashboard({ onLogout }) {
     if (!activeId || isLoading) return undefined
 
     let isCurrent = true
+    Promise.resolve().then(() => {
+      if (isCurrent) setLoadingHistoryChatId(activeId)
+    })
     chatService.loadMessages(activeId)
       .then(async (page) => {
         if (!isCurrent) return
@@ -556,6 +620,13 @@ function Dashboard({ onLogout }) {
       })
       .catch((error) => {
         if (isCurrent) showNotice(error.message || 'Riwayat pesan gagal dimuat.')
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setLoadingHistoryChatId((current) => (
+            String(current) === String(activeId) ? null : current
+          ))
+        }
       })
 
     return () => {
@@ -582,14 +653,17 @@ function Dashboard({ onLogout }) {
   }
 
   async function loadOlderMessages() {
-    const beforeId = pagination[activeId]
-    if (!beforeId || isLoadingOlder) return
+    const chatId = activeId
+    const chatKey = String(chatId)
+    const beforeId = pagination[chatId]
+    if (!chatId || !beforeId || loadingOlderChatIdsRef.current.has(chatKey)) return
 
-    setIsLoadingOlder(true)
+    loadingOlderChatIdsRef.current.add(chatKey)
+    setLoadingOlderChatIds((current) => new Set(current).add(chatKey))
     try {
-      const page = await chatService.loadMessages(activeId, { beforeId })
+      const page = await chatService.loadMessages(chatId, { beforeId })
       setChats((current) => current.map((chat) => {
-        if (String(chat.id) !== String(activeId)) return chat
+        if (String(chat.id) !== chatKey) return chat
         const existingIds = new Set(chat.messages.map((item) => String(item.id)))
         return {
           ...chat,
@@ -599,11 +673,16 @@ function Dashboard({ onLogout }) {
           ],
         }
       }))
-      setPagination((current) => ({ ...current, [activeId]: page.nextBeforeId }))
+      setPagination((current) => ({ ...current, [chatId]: page.nextBeforeId }))
     } catch (error) {
       showNotice(error.message || 'Riwayat pesan lama gagal dimuat.')
     } finally {
-      setIsLoadingOlder(false)
+      loadingOlderChatIdsRef.current.delete(chatKey)
+      setLoadingOlderChatIds((current) => {
+        const next = new Set(current)
+        next.delete(chatKey)
+        return next
+      })
     }
   }
 
@@ -758,6 +837,7 @@ function Dashboard({ onLogout }) {
             from: 'me',
             text,
             time,
+            receiptStatus: 'sent',
             ...(replyingTo ? {
               reply_to: {
                 id: replyingTo.id,
@@ -813,6 +893,8 @@ function Dashboard({ onLogout }) {
     <main
       className={`app-shell${activeSidePanel ? ' side-panel-open' : ''}`}
       data-theme={theme}
+      data-message-size={messageFontSize}
+      data-message-font={messageFontFamily}
     >
       <ChatSidebar
         chats={chats}
@@ -872,6 +954,7 @@ function Dashboard({ onLogout }) {
         profileInitials={currentProfileInitials}
         hasOlderMessages={Boolean(pagination[activeId])}
         isLoadingOlder={isLoadingOlder}
+        isLoadingMessages={isLoadingChatHistory}
         onLoadOlder={loadOlderMessages}
         isProfileExpanded={activeSidePanel === 'contact'}
         onMessageChange={setMessage}
@@ -938,8 +1021,12 @@ function Dashboard({ onLogout }) {
               onThemeChange={toggleTheme}
               notificationsEnabled={notificationsEnabled}
               readReceiptsEnabled={readReceiptsEnabled}
+              messageFontSize={messageFontSize}
+              messageFontFamily={messageFontFamily}
               onNotificationsChange={toggleNotifications}
               onReadReceiptsChange={toggleReadReceipts}
+              onMessageFontSizeChange={setMessageFontSize}
+              onMessageFontFamilyChange={setMessageFontFamily}
               onClose={() => setActiveSidePanel('profile')}
             />
           )}

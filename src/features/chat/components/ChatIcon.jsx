@@ -22,6 +22,7 @@ const iconPaths = {
   close: <><path d="m18 6-12 12M6 6l12 12" /></>,
   back: <><path d="m15 18-6-6 6-6" /></>,
   check: <><path d="m5 12 4 4L19 6" /></>,
+  'check-double': <><path d="m2 12 4 4L16 6" /><path d="m8 12 4 4 10-10" /></>,
   pin: <><path d="m12 17 5-5-5-5-5 5 5 5Z" /><path d="m12 12 8 8m-8-8-8 8" /></>,
 }
 
