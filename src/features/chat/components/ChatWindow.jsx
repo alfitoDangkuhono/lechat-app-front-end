@@ -5,17 +5,16 @@ import ChatIcon from './ChatIcon'
 
 function ChatWindow({
   chat,
+  groupMembers = [],
   message,
   onBack,
   onProfileClick,
   onPersonalProfileClick,
-  onSettingsClick,
   onArchiveChat,
   onNotice,
   readReceiptsEnabled,
   isProfileExpanded,
   isPersonalProfileExpanded,
-  isSettingsExpanded,
   profileInitials,
   socketStatus,
   onMessageChange,
@@ -26,8 +25,11 @@ function ChatWindow({
 }) {
   const [attachments, setAttachments] = useState([])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [replyingTo, setReplyingTo] = useState(null)
+  const [openMessageActionsId, setOpenMessageActionsId] = useState(null)
   const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
+  const messageGroups = groupMessagesByDate(chat?.messages ?? [])
   const previousMessagesRef = useRef({ count: chat?.messages?.length ?? 0, firstId: chat?.messages?.[0]?.id })
 
   useEffect(() => {
@@ -64,8 +66,9 @@ function ChatWindow({
     }
 
     try {
-      await onSendMessage(event, attachments)
+      await onSendMessage(event, attachments, replyingTo)
       setAttachments([])
+      setReplyingTo(null)
       setShowEmojiPicker(false)
     } catch (error) {
       onNotice(error.message || 'Pesan gagal dikirim.')
@@ -85,17 +88,14 @@ function ChatWindow({
         onBack={onBack}
         onProfileClick={onProfileClick}
         onPersonalProfileClick={onPersonalProfileClick}
-        onSettingsClick={onSettingsClick}
         onArchiveChat={onArchiveChat}
         onNotice={onNotice}
         isProfileExpanded={isProfileExpanded}
         isPersonalProfileExpanded={isPersonalProfileExpanded}
-        isSettingsExpanded={isSettingsExpanded}
         profileInitials={profileInitials}
       />
 
       <div className="chat-content">
-        <div className="day-divider"><span>HARI INI</span></div>
         {hasOlderMessages && (
           <button
             className="text-button"
@@ -107,27 +107,101 @@ function ChatWindow({
           </button>
         )}
         <div className="message-list">
-          {chat.messages.map((item) => (
-            <div
-              className={`message-row ${item.from === 'me' ? 'message-outgoing' : 'message-incoming'}`}
-              key={item.id}
-            >
-              {item.from === 'them' && <ChatAvatar chat={chat} small />}
-              <div className="message-body">
-                {item.author && <span className="message-author">{item.author}</span>}
-                {item.text && <div className="message-bubble">{item.text}</div>}
-                {item.attachments?.map((file) => (
-                  <div className="message-attachment" key={`${item.id}-${file.name}-${file.size}`}>
-                    <ChatIcon name="paperclip" size={15} />
-                    <span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span>
+          {messageGroups.map((group) => (
+            <section className="message-date-group" key={group.key}>
+              <div className="day-divider" role="separator"><span>{group.label}</span></div>
+              {group.messages.map((item) => {
+                const messageActionKey = String(item.id ?? item.client_message_id ?? '')
+                const isMessageActionsOpen = Boolean(messageActionKey)
+                  && openMessageActionsId === messageActionKey
+                const messageActions = (
+                  <span className="message-actions">
+                    <button
+                      className="message-actions-trigger"
+                      type="button"
+                      aria-label="Opsi pesan"
+                      aria-haspopup="menu"
+                      aria-expanded={isMessageActionsOpen}
+                      disabled={!messageActionKey}
+                      onClick={() => setOpenMessageActionsId((current) => (
+                        current === messageActionKey ? null : messageActionKey
+                      ))}
+                    >
+                      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
+                    </button>
+                    {isMessageActionsOpen && (
+                      <span className="message-actions-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setReplyingTo({
+                              id: item.id,
+                              senderName: item.from === 'me' ? 'Anda' : item.author || chat.name,
+                              text: item.text,
+                              isDeleted: Boolean(item.deleted_at || item.is_deleted),
+                            })
+                            setOpenMessageActionsId(null)
+                          }}
+                          disabled={item.pending || !item.id}
+                        >
+                          Balas
+                        </button>
+                      </span>
+                    )}
+                  </span>
+                )
+
+                return (
+                  <div
+                    className={`message-row ${item.from === 'me' ? 'message-outgoing' : 'message-incoming'}`}
+                    key={item.id}
+                  >
+                    {item.from === 'them' && (
+                      <ChatAvatar
+                        chat={chat.status === 'group'
+                          ? messageSenderAvatar(chat, item, groupMembers)
+                          : chat}
+                        small
+                      />
+                    )}
+                  <div className="message-body">
+                    {item.author && <span className="message-author">{item.author}</span>}
+                    {(item.text || item.reply_to || item.attachments?.length > 0) && (
+                      <div className="message-bubble">
+                        <div className="message-bubble-content">
+                        {item.reply_to && (
+                          <div className="message-reply-quote">
+                            <strong>{getReplySender(item.reply_to, chat)}</strong>
+                            <span>{getReplyText(item.reply_to)}</span>
+                          </div>
+                        )}
+                        {item.text && (
+                          <div className="message-text-line">
+                            {item.text}
+                          </div>
+                        )}
+                        {item.attachments?.map((file) => (
+                          <div className="message-attachment" key={`${item.id}-${file.name}-${file.size}`}>
+                            <ChatIcon name="paperclip" size={15} />
+                            <span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span>
+                          </div>
+                        ))}
+                        </div>
+                        {messageActions}
+                      </div>
+                    )}
+                    <div className="message-meta">
+                      <time>{item.time}</time>
+                      {item.from === 'me' && readReceiptsEnabled && <ChatIcon name="check" size={14} className="read-check" />}
+                    </div>
                   </div>
-                ))}
-                <div className="message-meta">
-                  <time>{item.time}</time>
-                  {item.from === 'me' && readReceiptsEnabled && <ChatIcon name="check" size={14} className="read-check" />}
-                </div>
-              </div>
-            </div>
+                  </div>
+                )
+              })}
+            </section>
           ))}
         </div>
         <div ref={messagesEndRef} />
@@ -178,6 +252,21 @@ function ChatWindow({
             ))}
           </div>
         )}
+        {replyingTo && (
+          <div className="composer-reply-preview">
+            <span className="composer-reply-copy">
+              <strong>Membalas {replyingTo.senderName}</strong>
+              <small>{replyingTo.isDeleted ? 'Pesan telah dihapus' : replyingTo.text}</small>
+            </span>
+            <button
+              type="button"
+              aria-label="Batalkan balasan"
+              onClick={() => setReplyingTo(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <input
           aria-label="Tulis pesan"
           placeholder={`Kirim pesan ke ${chat.name}...`}
@@ -193,6 +282,97 @@ function ChatWindow({
       </form>
     </section>
   )
+}
+
+function getReplySender(message, chat) {
+  if (message.from === 'me' || message.is_own) return 'Anda'
+  return message.author
+    || message.sender?.username
+    || message.username
+    || (chat.status === 'group' ? 'Anggota grup' : chat.name)
+}
+
+function getReplyText(message) {
+  if (message.is_deleted || message.deleted_at) return 'Pesan telah dihapus'
+  const text = message.text ?? message.body ?? message.content
+  if (text) return text
+  if (message.type && message.type !== 'text') return `Pesan ${message.type}`
+  return 'Pesan'
+}
+
+function groupMessagesByDate(messages) {
+  const today = new Date()
+  const todayKey = getLocalDateKey(today)
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayKey = getLocalDateKey(yesterday)
+
+  return messages.reduce((groups, message) => {
+    const rawDate = message.created_at ?? message.sent_at ?? message.timestamp ?? message.date
+    const parsedDate = rawDate ? new Date(rawDate) : today
+    const date = Number.isNaN(parsedDate.getTime()) ? today : parsedDate
+    const key = getLocalDateKey(date)
+    const label = key === todayKey
+      ? 'HARI INI'
+      : key === yesterdayKey
+        ? 'KEMARIN'
+        : new Intl.DateTimeFormat('id-ID', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }).format(date)
+    const currentGroup = groups[groups.length - 1]
+
+    if (currentGroup?.key === key) {
+      currentGroup.messages.push(message)
+    } else {
+      groups.push({ key, label, messages: [message] })
+    }
+
+    return groups
+  }, [])
+}
+
+function getLocalDateKey(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function messageSenderAvatar(chat, message, groupMembers) {
+  const senderId = message.sender_id
+    ?? message.user_id
+    ?? message.sender_user_id
+    ?? message.sender?.user_id
+    ?? message.sender?.id
+    ?? message.user?.user_id
+    ?? message.user?.id
+  const groupMember = groupMembers.find((member) => (
+    senderId !== undefined
+    && String(member.user_id ?? member.id) === String(senderId)
+  ))
+  const username = [
+    message.sender_username,
+    message.sender?.username,
+    message.user?.username,
+    typeof message.author === 'object' ? message.author.username : undefined,
+    groupMember?.username,
+  ].find((value) => typeof value === 'string' && value.trim())?.trim()
+
+  const colorOptions = ['peach', 'violet', 'blue', 'green', 'yellow']
+  const colorKey = senderId ?? username?.toLowerCase() ?? ''
+  const colorIndex = [...String(colorKey)].reduce(
+    (total, character) => total + character.charCodeAt(0),
+    0,
+  ) % colorOptions.length
+
+  return {
+    ...chat,
+    initials: username ? [...username].slice(0, 2).join('').toUpperCase() : '',
+    color: colorOptions[colorIndex],
+  }
 }
 
 function formatFileSize(size) {

@@ -15,8 +15,8 @@ function SettingsPanel({
     <aside className="details-panel settings-panel" id="settings-panel" aria-label="Pengaturan aplikasi">
       <div className="details-topline">
         <span>PENGATURAN</span>
-        <button className="icon-button" type="button" aria-label="Tutup pengaturan" onClick={onClose}>
-          <ChatIcon name="close" size={18} />
+        <button className="icon-button" type="button" aria-label="Kembali ke profil pribadi" onClick={onClose}>
+          <ChatIcon name="back" size={18} />
         </button>
       </div>
 
@@ -62,7 +62,7 @@ function SettingsPanel({
           <span className="settings-option-icon settings-icon-light"><ChatIcon name="bell" size={18} /></span>
           <span className="settings-option-copy">
             <strong>Notifikasi aplikasi</strong>
-            <small>Preferensi disimpan di browser ini</small>
+            <small>Suara dan pesan baru · perlu interaksi pertama</small>
           </span>
           <button
             className="theme-switch"

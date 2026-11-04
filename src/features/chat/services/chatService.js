@@ -152,7 +152,35 @@ export function mapConversation(conversation, index = 0) {
 
 export function mapMessage(message) {
   const sender = message.sender ?? message.user ?? {}
-  const senderId = message.sender_id ?? message.user_id ?? sender.id
+  const normalizedSender = typeof sender === 'object' && sender !== null ? sender : {}
+  const author = typeof message.author === 'object' && message.author !== null
+    ? message.author
+    : {}
+  const senderId = message.sender_id
+    ?? message.user_id
+    ?? message.sender_user_id
+    ?? normalizedSender.user_id
+    ?? normalizedSender.id
+  const senderName = [
+    normalizedSender.name,
+    normalizedSender.full_name,
+    normalizedSender.display_name,
+    [normalizedSender.first_name, normalizedSender.last_name]
+      .filter((part) => typeof part === 'string')
+      .join(' '),
+    normalizedSender.username,
+    message.sender_name,
+    message.sender_display_name,
+    [message.sender_first_name, message.sender_last_name]
+      .filter((part) => typeof part === 'string')
+      .join(' '),
+    message.sender_username,
+    message.username,
+    author.name,
+    author.full_name,
+    author.username,
+    message.author,
+  ].find((name) => typeof name === 'string' && name.trim())?.trim() ?? ''
   const currentUserId = getUserIdFromToken()
   const from = message.is_own
     || message.is_mine
@@ -161,13 +189,46 @@ export function mapMessage(message) {
     || (currentUserId !== null && senderId !== undefined && String(senderId) === String(currentUserId))
     ? 'me'
     : 'them'
+  const rawReply = message.reply_to ?? message.reply ?? null
+  const rawReplySender = rawReply?.sender
+  const rawReplySenderObject = typeof rawReplySender === 'object' && rawReplySender !== null
+    ? rawReplySender
+    : {}
+  const rawReplySenderId = rawReply?.sender_id
+    ?? rawReplySenderObject.user_id
+    ?? rawReplySenderObject.id
+  const replyTo = typeof rawReply === 'object' && rawReply !== null
+    ? {
+      ...rawReply,
+      id: rawReply.id ?? rawReply.message_id,
+      sender_id: rawReplySenderId,
+      author: rawReply.author
+        ?? rawReply.sender_username
+        ?? rawReply.username
+        ?? rawReplySenderObject.username
+        ?? '',
+      text: rawReply.body ?? rawReply.content ?? rawReply.text ?? '',
+      type: rawReply.type ?? rawReply.message_type ?? 'text',
+      from: rawReply.is_own
+        || rawReply.is_mine
+        || rawReply.is_self
+        || rawReplySenderObject.is_self
+        || (currentUserId !== null
+          && rawReplySenderId !== undefined
+          && String(rawReplySenderId) === String(currentUserId))
+        ? 'me'
+        : 'them',
+    }
+    : null
 
   return {
     ...message,
-    id: message.id ?? message.client_message_id,
+    id: message.id ?? message.message_id ?? message.client_message_id,
+    sender_id: senderId,
     from,
-    author: sender.name ?? sender.full_name ?? message.author ?? '',
+    author: senderName,
     text: message.body ?? message.content ?? message.text ?? '',
+    reply_to: replyTo,
     time: formatTime(message.created_at ?? message.time),
   }
 }
@@ -239,6 +300,32 @@ async function listGroupInvitations() {
       ?? invitation.inviter_name
       ?? 'Pengguna',
   }))
+}
+
+async function listGroupMembers(conversationId) {
+  const response = await api.get(
+    `/conversations/${encodeURIComponent(conversationId)}/members`,
+  )
+  const data = responseData(response)
+  if (!Array.isArray(data)) {
+    throw new Error('Respons daftar anggota grup tidak valid.')
+  }
+
+  return data.map((member) => {
+    const firstName = typeof member.first_name === 'string' ? member.first_name : ''
+    const lastName = typeof member.last_name === 'string' ? member.last_name : ''
+    const name = [firstName, lastName].filter(Boolean).join(' ')
+      || member.username
+      || 'Pengguna'
+
+    return {
+      ...member,
+      id: member.user_id,
+      name,
+      initials: name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+      role: member.role,
+    }
+  })
 }
 
 async function requestContact(phone) {
@@ -344,10 +431,12 @@ async function restoreConversation(conversationId) {
 }
 
 export const chatService = {
+  getCurrentUserId: getUserIdFromToken,
   listConversations,
   listContacts,
   listContactRequests,
   listGroupInvitations,
+  listGroupMembers,
   requestContact,
   respondToContactRequest,
   respondToGroupInvitation,

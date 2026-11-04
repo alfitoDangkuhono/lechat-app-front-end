@@ -8,6 +8,7 @@ import {
   registerUser,
 } from './features/auth/services/authService'
 import { clearAuthTokens, getAuthToken } from './features/auth/services/authTokenService'
+import { clearCachedCurrentUserProfile } from './features/profile'
 import { Dashboard } from './features/chat'
 
 function App() {
@@ -18,6 +19,10 @@ function App() {
   const [sessionCheckError, setSessionCheckError] = useState('')
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0)
   const [authNotice, setAuthNotice] = useState('')
+
+  useEffect(() => {
+    if (authStatus === 'unauthenticated') clearCachedCurrentUserProfile()
+  }, [authStatus])
 
   useEffect(() => {
     function handleSessionExpired() {

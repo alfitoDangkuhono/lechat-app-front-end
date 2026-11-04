@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSidebar from './ChatSidebar'
+import ChatAvatar from './ChatAvatar'
+import ChatIcon from './ChatIcon'
 import ChatWindow from './ChatWindow'
 import ContactDetails from '../../contact/components/ContactDetails'
-import { getCurrentUserProfile, PersonalProfile, profileInitials } from '../../profile'
+import {
+  getCachedCurrentUserProfile,
+  getCurrentUserProfile,
+  PersonalProfile,
+  profileInitials,
+  saveCachedCurrentUserProfile,
+} from '../../profile'
 import { SettingsPanel, useChatPreferences, useTheme } from '../../settings'
 import { chatService } from '../services/chatService'
 import { connectWebSocket } from '../services/webSocketService'
@@ -26,9 +34,42 @@ function mergeMessageLists(primary, secondary) {
   return secondary.reduce((messages, item) => mergeMessages(messages, item), primary)
 }
 
+async function playNotificationSound(audioContext) {
+  if (!audioContext || audioContext.state === 'closed') return
+
+  if (audioContext.state !== 'running') {
+    try {
+      await audioContext.resume()
+    } catch (error) {
+      console.warn('Audio notifikasi gagal diputar:', error)
+      return
+    }
+  }
+  if (audioContext.state !== 'running') return
+
+  const oscillator = audioContext.createOscillator()
+  const volume = audioContext.createGain()
+  const now = audioContext.currentTime
+
+  oscillator.type = 'sine'
+  oscillator.frequency.setValueAtTime(880, now)
+  oscillator.frequency.setValueAtTime(1174.66, now + 0.12)
+  volume.gain.setValueAtTime(0.0001, now)
+  volume.gain.exponentialRampToValueAtTime(0.3, now + 0.02)
+  volume.gain.exponentialRampToValueAtTime(0.0001, now + 0.32)
+  oscillator.connect(volume)
+  volume.connect(audioContext.destination)
+  oscillator.start(now)
+  oscillator.stop(now + 0.34)
+}
+
 function Dashboard({ onLogout }) {
   const [chats, setChats] = useState([])
   const [contacts, setContacts] = useState([])
+  const [groupMemberState, setGroupMemberState] = useState(null)
+  const [contactsLoaded, setContactsLoaded] = useState(false)
+  const [isLoadingGroupContacts, setIsLoadingGroupContacts] = useState(false)
+  const [groupContactsError, setGroupContactsError] = useState('')
   const [contactRequests, setContactRequests] = useState([])
   const [outgoingContactRequests, setOutgoingContactRequests] = useState([])
   const [groupInvitations, setGroupInvitations] = useState([])
@@ -44,8 +85,8 @@ function Dashboard({ onLogout }) {
   const [showConversations, setShowConversations] = useState(true)
   const [activeView, setActiveView] = useState('chats')
   const [activeSidePanel, setActiveSidePanel] = useState(null)
-  const [userProfile, setUserProfile] = useState(null)
-  const [isProfileLoading, setIsProfileLoading] = useState(false)
+  const [userProfile, setUserProfile] = useState(() => getCachedCurrentUserProfile())
+  const [isProfileLoading, setIsProfileLoading] = useState(true)
   const [profileLoadError, setProfileLoadError] = useState('')
   const [profileLoadAttempt, setProfileLoadAttempt] = useState(0)
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
@@ -53,7 +94,10 @@ function Dashboard({ onLogout }) {
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef(null)
   const socketRef = useRef(null)
+  const notificationAudioRef = useRef(null)
   const pendingMessagesRef = useRef(new Map())
+  const notifiedMessagesRef = useRef(new Set())
+  const showConversationsRef = useRef(showConversations)
   const { theme, toggleTheme } = useTheme()
   const {
     notificationsEnabled,
@@ -61,10 +105,53 @@ function Dashboard({ onLogout }) {
     toggleNotifications,
     toggleReadReceipts,
   } = useChatPreferences()
+  const notificationsEnabledRef = useRef(notificationsEnabled)
   const activeChat = chats.find((chat) => chat.id === activeId)
   const visibleChats = chats.filter((chat) => !chat.archived)
   const archivedChats = chats.filter((chat) => chat.archived)
   const currentProfileInitials = profileInitials(userProfile)
+
+  useEffect(() => {
+    showConversationsRef.current = showConversations
+  }, [showConversations])
+
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled
+  }, [notificationsEnabled])
+
+  useEffect(() => {
+    function enableNotificationAudio() {
+      if (notificationAudioRef.current) {
+        if (notificationAudioRef.current.state === 'suspended') {
+          notificationAudioRef.current.resume().catch((error) => {
+            console.warn('Audio notifikasi gagal diaktifkan:', error)
+          })
+        }
+        return
+      }
+
+      const AudioContextConstructor = window.AudioContext ?? window.webkitAudioContext
+      if (!AudioContextConstructor) return
+
+      const audioContext = new AudioContextConstructor()
+      notificationAudioRef.current = audioContext
+      audioContext.resume().catch((error) => {
+        console.warn('Audio notifikasi gagal diaktifkan:', error)
+      })
+    }
+
+    window.addEventListener('pointerdown', enableNotificationAudio)
+    window.addEventListener('keydown', enableNotificationAudio)
+    return () => {
+      window.removeEventListener('pointerdown', enableNotificationAudio)
+      window.removeEventListener('keydown', enableNotificationAudio)
+      if (notificationAudioRef.current) {
+        notificationAudioRef.current.close().catch((error) => {
+          console.warn('Audio notifikasi gagal dihentikan:', error)
+        })
+      }
+    }
+  }, [])
 
   function showNotice(text) {
     window.clearTimeout(noticeTimer.current)
@@ -78,8 +165,6 @@ function Dashboard({ onLogout }) {
       return
     }
 
-    setProfileLoadError('')
-    setIsProfileLoading(true)
     setActiveSidePanel('profile')
   }
 
@@ -99,6 +184,49 @@ function Dashboard({ onLogout }) {
       setLoadError(error.message || 'Percakapan gagal dimuat.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function loadGroupContacts() {
+    if (contactsLoaded || isLoadingGroupContacts) return
+
+    setIsLoadingGroupContacts(true)
+    setGroupContactsError('')
+    try {
+      const loadedContacts = await chatService.listContacts()
+      setContacts(loadedContacts)
+      setContactsLoaded(true)
+    } catch (error) {
+      setGroupContactsError(error.message || 'Kontak gagal dimuat.')
+    } finally {
+      setIsLoadingGroupContacts(false)
+    }
+  }
+
+  async function retryLoadGroupMembers() {
+    if (!activeChat || activeChat.status !== 'group') return
+
+    const conversationId = activeChat.id
+    setGroupMemberState({
+      conversationId,
+      members: groupMemberState?.conversationId === conversationId
+        ? groupMemberState.members
+        : [],
+      error: '',
+      loading: true,
+    })
+    try {
+      const members = await chatService.listGroupMembers(conversationId)
+      setGroupMemberState({ conversationId, members, error: '', loading: false })
+      return members
+    } catch (error) {
+      setGroupMemberState({
+        conversationId,
+        members: [],
+        error: error.message || 'Anggota grup gagal dimuat.',
+        loading: false,
+      })
+      return null
     }
   }
 
@@ -151,6 +279,7 @@ function Dashboard({ onLogout }) {
       .then(([loadedContacts, loadedRequests, loadedInvitations]) => {
         if (!isCurrent) return
         setContacts(loadedContacts)
+        setContactsLoaded(true)
         setContactRequests(loadedRequests.incoming)
         setOutgoingContactRequests(loadedRequests.outgoing)
         setGroupInvitations(loadedInvitations)
@@ -165,12 +294,43 @@ function Dashboard({ onLogout }) {
   }, [activeView])
 
   useEffect(() => {
-    if (activeSidePanel !== 'profile') return undefined
+    if (activeChat?.status !== 'group') return undefined
 
+    let isCurrent = true
+    chatService.listGroupMembers(activeChat.id)
+      .then((members) => {
+        if (isCurrent) {
+          setGroupMemberState({
+            conversationId: activeChat.id,
+            members,
+            error: '',
+            loading: false,
+          })
+        }
+      })
+      .catch((error) => {
+        if (isCurrent) {
+          setGroupMemberState({
+            conversationId: activeChat.id,
+            members: [],
+            error: error.message || 'Anggota grup gagal dimuat.',
+            loading: false,
+          })
+        }
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [activeChat?.id, activeChat?.status])
+
+  useEffect(() => {
     let isCurrent = true
     getCurrentUserProfile()
       .then((profile) => {
-        if (isCurrent) setUserProfile(profile)
+        if (!isCurrent) return
+        setUserProfile(profile)
+        saveCachedCurrentUserProfile(profile)
       })
       .catch((error) => {
         if (isCurrent) {
@@ -184,10 +344,10 @@ function Dashboard({ onLogout }) {
     return () => {
       isCurrent = false
     }
-  }, [activeSidePanel, profileLoadAttempt])
+  }, [profileLoadAttempt])
 
   useEffect(() => {
-    if (!activeId || isLoading) return undefined
+    if (isLoading) return undefined
 
     let isCurrent = true
     const connection = connectWebSocket({
@@ -196,7 +356,17 @@ function Dashboard({ onLogout }) {
       onEvent(event) {
         if (!isCurrent) return
 
+        const eventConversationId = event.conversation_id
+          ?? event.data?.conversation_id
+          ?? event.data?.message?.conversation_id
+          ?? (activeId ? activeId : null)
+        const isViewingConversation = activeId !== null
+          && eventConversationId !== null
+          && String(eventConversationId) === String(activeId)
+          && !(window.matchMedia('(max-width: 760px)').matches && showConversationsRef.current)
+
         if (event.type === 'conversation.history') {
+          if (!activeId) return
           const items = (event.data?.items ?? []).map(chatService.mapMessage).reverse()
           setPagination((current) => ({
             ...current,
@@ -221,11 +391,13 @@ function Dashboard({ onLogout }) {
               conversation_id: activeId,
               through_message_id: lastIncomingMessage.id,
             })
-            connection.send({
-              type: 'receipt.read',
-              conversation_id: activeId,
-              through_message_id: lastIncomingMessage.id,
-            })
+            if (isViewingConversation) {
+              connection.send({
+                type: 'receipt.read',
+                conversation_id: activeId,
+                through_message_id: lastIncomingMessage.id,
+              })
+            }
           }
 
           const outstanding = pending
@@ -246,7 +418,7 @@ function Dashboard({ onLogout }) {
             String(chat.id) === String(activeId)
               ? {
                 ...chat,
-                unread: 0,
+                unread: isViewingConversation ? 0 : chat.unread,
                 messages: mergeMessageLists(items, mergeMessageLists(chat.messages, outstanding)),
               }
               : chat
@@ -256,35 +428,77 @@ function Dashboard({ onLogout }) {
 
         if (event.type === 'message.created' || event.type === 'message.updated') {
           const rawMessage = event.data?.message ?? event.data
-          if (!rawMessage) return
+          if (!rawMessage || eventConversationId === null) return
           const incoming = chatService.mapMessage(rawMessage)
           if (incoming.client_message_id) {
             pendingMessagesRef.current.delete(incoming.client_message_id)
           }
-          if (incoming.from === 'them' && incoming.id) {
+          if (isViewingConversation && incoming.from === 'them' && incoming.id) {
             connection.send({
               type: 'receipt.delivered',
-              conversation_id: activeId,
+              conversation_id: eventConversationId,
               through_message_id: incoming.id,
             })
             connection.send({
               type: 'receipt.read',
-              conversation_id: activeId,
+              conversation_id: eventConversationId,
               through_message_id: incoming.id,
             })
-            chatService.markConversationRead(activeId, incoming.id)
+            chatService.markConversationRead(eventConversationId, incoming.id)
               .catch((error) => showNotice(error.message || 'Status baca gagal diperbarui.'))
           }
-          setChats((current) => current.map((chat) => (
-            String(chat.id) === String(event.conversation_id ?? activeId)
-              ? {
-                ...chat,
-                preview: incoming.text || chat.preview,
-                time: incoming.time,
-                messages: mergeMessages(chat.messages, incoming),
-              }
-              : chat
-          )))
+          const messageKey = `${eventConversationId}:${incoming.id}`
+          const shouldNotify = event.type === 'message.created'
+            && incoming.from === 'them'
+            && incoming.id
+            && !notifiedMessagesRef.current.has(messageKey)
+          if (shouldNotify) {
+            notifiedMessagesRef.current.add(messageKey)
+            if (notifiedMessagesRef.current.size > 100) {
+              const oldestKey = notifiedMessagesRef.current.values().next().value
+              notifiedMessagesRef.current.delete(oldestKey)
+            }
+          }
+          setChats((current) => {
+            const conversationIndex = current.findIndex((chat) => (
+              String(chat.id) === String(eventConversationId)
+            ))
+            if (conversationIndex < 0) return current
+
+            const conversation = current[conversationIndex]
+            const isDuplicate = conversation.messages.some((item) => (
+              String(item.id) === String(incoming.id)
+              || (
+                incoming.client_message_id
+                && item.client_message_id === incoming.client_message_id
+              )
+            ))
+            const updatedConversation = {
+              ...conversation,
+              preview: incoming.text || conversation.preview,
+              time: incoming.time,
+              unread: event.type === 'message.created'
+                && incoming.from === 'them'
+                && incoming.id
+                && !isViewingConversation
+                && !isDuplicate
+                ? conversation.unread + 1
+                : conversation.unread,
+              messages: mergeMessages(conversation.messages, incoming),
+            }
+
+            return conversationIndex === 0
+              ? [updatedConversation, ...current.slice(1)]
+              : [
+                updatedConversation,
+                ...current.slice(0, conversationIndex),
+                ...current.slice(conversationIndex + 1),
+              ]
+          })
+          if (shouldNotify && notificationsEnabledRef.current) {
+            void playNotificationSound(notificationAudioRef.current)
+            showNotice(`${incoming.author || 'Pesan baru'}: ${incoming.text || 'Pesan baru'}`)
+          }
           return
         }
 
@@ -434,6 +648,7 @@ function Dashboard({ onLogout }) {
         chatService.listContactRequests(),
       ])
       setContacts(loadedContacts)
+      setContactsLoaded(true)
       setContactRequests(loadedRequests.incoming)
       setOutgoingContactRequests(loadedRequests.outgoing)
       showNotice(accepted ? 'Permintaan kontak diterima.' : 'Permintaan kontak ditolak.')
@@ -467,7 +682,12 @@ function Dashboard({ onLogout }) {
       showNotice('Undangan grup berhasil dikirim.')
       return true
     } catch (error) {
-      showNotice(error.message || 'Anggota gagal diundang.')
+      if (error.response?.status === 409) {
+        await retryLoadGroupMembers()
+        showNotice(error.message || 'Kontak sudah menjadi anggota atau memiliki undangan yang masih aktif.')
+      } else {
+        showNotice(error.message || 'Anggota gagal diundang.')
+      }
       return false
     }
   }
@@ -501,7 +721,7 @@ function Dashboard({ onLogout }) {
     }
   }
 
-  async function sendMessage(event, attachments = []) {
+  async function sendMessage(event, attachments = [], replyingTo = null) {
     event.preventDefault()
     const text = message.trim()
     if (!text && attachments.length === 0) return
@@ -519,6 +739,7 @@ function Dashboard({ onLogout }) {
       client_message_id: crypto.randomUUID(),
       message_type: 'text',
       body: text,
+      ...(replyingTo?.id ? { reply_to_message_id: replyingTo.id } : {}),
     }
     const time = new Intl.DateTimeFormat('id-ID', {
       hour: '2-digit',
@@ -537,6 +758,14 @@ function Dashboard({ onLogout }) {
             from: 'me',
             text,
             time,
+            ...(replyingTo ? {
+              reply_to: {
+                id: replyingTo.id,
+                author: replyingTo.senderName,
+                body: replyingTo.text,
+                is_deleted: replyingTo.isDeleted,
+              },
+            } : {}),
             pending: true,
           }),
           time,
@@ -598,14 +827,16 @@ function Dashboard({ onLogout }) {
         showConversations={showConversations}
         activeView={activeView}
         isProfileExpanded={activeSidePanel === 'profile'}
-        isSettingsExpanded={activeSidePanel === 'settings'}
         profileInitials={currentProfileInitials}
         onFilterChange={setFilter}
         onViewChange={(view) => {
           setActiveView(view)
           setShowConversations(true)
         }}
-        onNewChat={() => setIsNewChatOpen(true)}
+        onNewChat={() => {
+          setIsNewChatOpen(true)
+          void loadGroupContacts()
+        }}
         onAddContact={addContact}
         contactRequests={contactRequests}
         outgoingContactRequests={outgoingContactRequests}
@@ -622,29 +853,31 @@ function Dashboard({ onLogout }) {
         onSelectChat={selectChat}
         onSelectContact={selectContact}
         onProfileClick={togglePersonalProfile}
-        onSettingsClick={() => setActiveSidePanel((panel) => panel === 'settings' ? null : 'settings')}
       />
       <ChatWindow
         key={activeId ?? 'empty-chat'}
         chat={activeChat}
+        groupMembers={groupMemberState && groupMemberState.conversationId === activeChat?.id
+          ? groupMemberState.members
+          : []}
         message={message}
         onBack={() => setShowConversations(true)}
         onProfileClick={() => setActiveSidePanel((panel) => panel === 'contact' ? null : 'contact')}
         onPersonalProfileClick={togglePersonalProfile}
-        onSettingsClick={() => setActiveSidePanel((panel) => panel === 'settings' ? null : 'settings')}
         onArchiveChat={() => activeChat && archiveChat(activeChat.id)}
         onNotice={showNotice}
         readReceiptsEnabled={readReceiptsEnabled}
         socketStatus={socketStatus}
         isPersonalProfileExpanded={activeSidePanel === 'profile'}
-        isSettingsExpanded={activeSidePanel === 'settings'}
         profileInitials={currentProfileInitials}
         hasOlderMessages={Boolean(pagination[activeId])}
         isLoadingOlder={isLoadingOlder}
         onLoadOlder={loadOlderMessages}
         isProfileExpanded={activeSidePanel === 'contact'}
         onMessageChange={setMessage}
-        onSendMessage={(event, attachments) => sendMessage(event, attachments)}
+        onSendMessage={(event, attachments, replyingTo) => (
+          sendMessage(event, attachments, replyingTo)
+        )}
       />
       {notice && <div className="chat-toast" role="status">{notice}</div>}
       {activeSidePanel && (
@@ -658,11 +891,36 @@ function Dashboard({ onLogout }) {
           {activeSidePanel === 'contact' ? (
             <ContactDetails
               chat={activeChat}
+              contacts={contacts}
+              members={groupMemberState && groupMemberState.conversationId === activeChat?.id
+                ? groupMemberState.members
+                : []}
+              membersError={groupMemberState && groupMemberState.conversationId === activeChat?.id
+                ? groupMemberState.error
+                : ''}
+              isLoadingMembers={activeChat?.status === 'group'
+                && (
+                  groupMemberState?.conversationId !== activeChat.id
+                  || groupMemberState.loading
+                )}
+              canInviteMembers={groupMemberState
+                && groupMemberState.conversationId === activeChat?.id
+                && !groupMemberState.loading
+                && groupMemberState.members.some((member) => (
+                  String(member.user_id) === String(chatService.getCurrentUserId())
+                  && ['owner', 'admin'].includes(String(member.role).toLowerCase())
+                ))}
+              onRetryLoadMembers={retryLoadGroupMembers}
+              onRefreshMembers={retryLoadGroupMembers}
+              isLoadingContacts={isLoadingGroupContacts}
+              contactsError={groupContactsError}
+              onLoadContacts={loadGroupContacts}
               onClose={() => setActiveSidePanel(null)}
               onViewMedia={() => setIsMediaOpen(true)}
               onFileAction={() => showNotice('File contoh ini belum tersedia untuk diunduh.')}
               onCall={() => showNotice('Fitur panggilan belum terhubung ke layanan.')}
               onInviteMember={inviteGroupMember}
+              onNotice={showNotice}
             />
           ) : activeSidePanel === 'profile' ? (
             <PersonalProfile
@@ -670,6 +928,7 @@ function Dashboard({ onLogout }) {
               isLoading={isProfileLoading}
               loadError={profileLoadError}
               onRetry={retryLoadProfile}
+              onSettingsClick={() => setActiveSidePanel('settings')}
               onClose={() => setActiveSidePanel(null)}
               onLogout={onLogout}
             />
@@ -681,13 +940,22 @@ function Dashboard({ onLogout }) {
               readReceiptsEnabled={readReceiptsEnabled}
               onNotificationsChange={toggleNotifications}
               onReadReceiptsChange={toggleReadReceipts}
-              onClose={() => setActiveSidePanel(null)}
+              onClose={() => setActiveSidePanel('profile')}
             />
           )}
         </>
       )}
       {isNewChatOpen && (
         <NewChatDialog
+          contacts={contacts}
+          isLoadingContacts={isLoadingGroupContacts}
+          contactsError={groupContactsError}
+          onRetryLoadContacts={loadGroupContacts}
+          onOpenContacts={() => {
+            setIsNewChatOpen(false)
+            setActiveView('contacts')
+            setShowConversations(true)
+          }}
           onClose={() => setIsNewChatOpen(false)}
           onCreate={createConversation}
         />
@@ -699,24 +967,34 @@ function Dashboard({ onLogout }) {
   )
 }
 
-function NewChatDialog({ onClose, onCreate }) {
-  const [memberIdsText, setMemberIdsText] = useState('')
+function NewChatDialog({
+  contacts,
+  isLoadingContacts,
+  contactsError,
+  onRetryLoadContacts,
+  onOpenContacts,
+  onClose,
+  onCreate,
+}) {
+  const [selectedIds, setSelectedIds] = useState([])
+  const [search, setSearch] = useState('')
   const [title, setTitle] = useState('')
-  const [type, setType] = useState('direct')
-  const [formError, setFormError] = useState('')
+  const query = search.trim().toLowerCase()
+  const filteredContacts = contacts.filter((contact) => (
+    `${contact.name} ${contact.username ?? ''}`.toLowerCase().includes(query)
+  ))
 
   function handleSubmit(event) {
     event.preventDefault()
-    const memberIds = memberIdsText.split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .map((value) => (/^\d+$/.test(value) ? Number(value) : value))
-    if (type === 'direct' && memberIds.length !== 1) {
-      setFormError('Direct chat harus memiliki tepat satu ID pengguna.')
-      return
-    }
-    setFormError('')
-    onCreate({ type, memberIds, title })
+    const memberIds = selectedIds.map((id) => (/^\d+$/.test(id) ? Number(id) : id))
+    onCreate({ type: 'group', memberIds, title })
+  }
+
+  function toggleContact(contactId) {
+    const normalizedId = String(contactId)
+    setSelectedIds((current) => current.includes(normalizedId)
+      ? current.filter((id) => id !== normalizedId)
+      : [...current, normalizedId])
   }
 
   return (
@@ -724,7 +1002,7 @@ function NewChatDialog({ onClose, onCreate }) {
       if (event.target === event.currentTarget) onClose()
     }}>
       <section
-        className="chat-modal"
+        className="chat-modal new-group-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-chat-title"
@@ -734,49 +1012,83 @@ function NewChatDialog({ onClose, onCreate }) {
       >
         <div className="chat-modal-heading">
           <div>
-            <span className="eyebrow">MULAI TERHUBUNG</span>
-            <h2 id="new-chat-title">Percakapan baru</h2>
+            <span className="eyebrow">OBROLAN BERSAMA</span>
+            <h2 id="new-chat-title">Buat grup baru</h2>
           </div>
           <button className="icon-button" type="button" aria-label="Tutup" onClick={onClose}>×</button>
         </div>
         <form onSubmit={handleSubmit}>
-          <label htmlFor="new-chat-members">
-            {type === 'direct' ? 'ID pengguna' : 'ID anggota'}
-          </label>
+          <label htmlFor="new-chat-title">Nama grup <span>(opsional)</span></label>
           <input
             autoFocus
-            id="new-chat-members"
-            value={memberIdsText}
-            onChange={(event) => setMemberIdsText(event.target.value)}
-            maxLength={200}
-            placeholder={type === 'direct' ? 'Contoh: 24' : 'Contoh: 24, 31'}
-            required
+            id="new-chat-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength={60}
+            placeholder="Contoh: Tim Produk"
           />
-          <label className="new-chat-type-label" htmlFor="new-chat-type">Jenis percakapan</label>
-          <select id="new-chat-type" value={type} onChange={(event) => {
-            setType(event.target.value)
-            setFormError('')
-          }}>
-            <option value="direct">Kontak</option>
-            <option value="group">Grup</option>
-          </select>
-          {type === 'group' && (
-            <>
-              <label htmlFor="new-chat-title">Nama grup (opsional)</label>
-              <input
-                id="new-chat-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                maxLength={60}
-                placeholder="Contoh: Tim Produk"
-              />
-            </>
-          )}
-          <p>Gunakan ID pengguna. Chat langsung hanya dapat dibuat dengan kontak yang sudah diterima.</p>
-          {formError && <p className="login-error" role="alert">{formError}</p>}
+
+          <div className="group-member-heading">
+            <span>Pilih anggota</span>
+            <span>{selectedIds.length} dipilih</span>
+          </div>
+          <label className="group-contact-search">
+            <ChatIcon name="search" size={17} />
+            <input
+              type="search"
+              placeholder="Cari nama kontak..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="Cari kontak untuk grup"
+            />
+          </label>
+
+          <div className="group-contact-list" aria-label="Daftar kontak">
+            {isLoadingContacts ? (
+              <p className="empty-state" role="status">Memuat daftar kontak...</p>
+            ) : contactsError ? (
+              <div className="group-contact-error" role="alert">
+                <p>{contactsError}</p>
+                <button type="button" onClick={onRetryLoadContacts}>Coba lagi</button>
+              </div>
+            ) : contacts.length === 0 ? (
+              <div className="group-contact-empty">
+                <p>Belum ada kontak untuk ditambahkan ke grup.</p>
+                <button type="button" onClick={onOpenContacts}>Buka daftar kontak</button>
+              </div>
+            ) : filteredContacts.length === 0 ? (
+              <p className="empty-state">Kontak tidak ditemukan.</p>
+            ) : filteredContacts.map((contact) => {
+              const isSelected = selectedIds.includes(String(contact.id))
+              return (
+                <label
+                  className={`group-contact-option${isSelected ? ' selected' : ''}`}
+                  key={contact.id}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleContact(contact.id)}
+                  />
+                  <ChatAvatar chat={contact} />
+                  <span className="contact-list-copy">
+                    <strong>{contact.name}</strong>
+                    <small>{contact.status === 'online' ? 'Online sekarang' : 'Kontak'}</small>
+                  </span>
+                  <span
+                    className={`contact-presence${contact.status === 'online' ? ' is-online' : ''}`}
+                    aria-label={contact.status === 'online' ? 'Online' : 'Offline'}
+                  />
+                </label>
+              )
+            })}
+          </div>
+
           <div className="chat-modal-actions">
             <button type="button" onClick={onClose}>Batal</button>
-            <button type="submit" disabled={!memberIdsText.trim()}>Buat percakapan</button>
+            <button type="submit" disabled={!selectedIds.length || isLoadingContacts || Boolean(contactsError)}>
+              Buat grup
+            </button>
           </div>
         </form>
       </section>
