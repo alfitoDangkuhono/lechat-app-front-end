@@ -5,6 +5,7 @@ import { ContactsList } from '../../contact'
 
 function ChatSidebar({
   chats,
+  contacts,
   filteredChats,
   archivedChats,
   isLoading,
@@ -15,20 +16,28 @@ function ChatSidebar({
   showConversations,
   isProfileExpanded,
   isSettingsExpanded,
+  profileInitials,
   activeView,
   onFilterChange,
   onViewChange,
   onNewChat,
   onAddContact,
+  contactRequests,
+  outgoingContactRequests,
+  groupInvitations,
+  onRespondToContactRequest,
+  onRespondToGroupInvitation,
   onRetryLoad,
   onRestoreChat,
   onClearFilter,
   onSearchChange,
   onSelectChat,
+  onSelectContact,
   onProfileClick,
   onSettingsClick,
 }) {
   const unreadTotal = chats.filter((chat) => !chat.archived && chat.unread > 0).length
+  const outgoingRequestCount = outgoingContactRequests.length
 
   useEffect(() => {
     function handleSearchShortcut(event) {
@@ -65,11 +74,21 @@ function ChatSidebar({
           <button
             className={`rail-button${activeView === 'contacts' ? ' active' : ''}`}
             type="button"
-            aria-label="Kontak"
+            aria-label={outgoingRequestCount > 0
+              ? `Kontak, ${outgoingRequestCount} menunggu persetujuan`
+              : 'Kontak'}
             aria-current={activeView === 'contacts' ? 'page' : undefined}
             onClick={() => onViewChange('contacts')}
           >
             <ChatIcon name="users" />
+            {outgoingRequestCount > 0 && (
+              <span
+                className="contact-request-badge"
+                aria-label={`${outgoingRequestCount} permintaan menunggu persetujuan`}
+              >
+                {outgoingRequestCount}
+              </span>
+            )}
           </button>
           <button
             className={`rail-button${activeView === 'archive' ? ' active' : ''}`}
@@ -80,8 +99,6 @@ function ChatSidebar({
           >
             <ChatIcon name="archive" />
           </button>
-        </nav>
-        <div className="rail-bottom">
           <button
             className={`rail-button${isSettingsExpanded ? ' active' : ''}`}
             type="button"
@@ -100,9 +117,9 @@ function ChatSidebar({
             aria-controls="personal-profile-panel"
             onClick={onProfileClick}
           >
-            AR
+            {profileInitials}
           </button>
-        </div>
+        </nav>
       </aside>
 
       <aside className={`conversations${showConversations ? ' conversations-mobile-open' : ''}${activeView === 'contacts' ? ' contacts-view' : ''}`}>
@@ -120,7 +137,7 @@ function ChatSidebar({
               aria-controls="personal-profile-panel"
               onClick={onProfileClick}
             >
-              <span className="avatar avatar-profile">AR</span>
+              <span className="avatar avatar-profile">{profileInitials}</span>
             </button>
             <button
               className={`icon-button mobile-list-action${isSettingsExpanded ? ' active' : ''}`}
@@ -154,6 +171,14 @@ function ChatSidebar({
             onClick={() => onViewChange('contacts')}
           >
             <ChatIcon name="users" size={15} /> Kontak
+            {outgoingRequestCount > 0 && (
+              <span
+                className="contact-request-badge mobile-contact-request-badge"
+                aria-label={`${outgoingRequestCount} permintaan menunggu persetujuan`}
+              >
+                {outgoingRequestCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -175,11 +200,16 @@ function ChatSidebar({
           </div>
         ) : activeView === 'contacts' ? (
           <ContactsList
-            chats={chats.filter((chat) => !chat.archived)}
+            contacts={contacts}
             search={search}
             onSearchChange={onSearchChange}
-            onSelectContact={onSelectChat}
+            onSelectContact={onSelectContact}
             onAddContact={onAddContact}
+            contactRequests={contactRequests}
+            outgoingContactRequests={outgoingContactRequests}
+            groupInvitations={groupInvitations}
+            onRespondToContactRequest={onRespondToContactRequest}
+            onRespondToGroupInvitation={onRespondToGroupInvitation}
           />
         ) : activeView === 'archive' ? (
           <>

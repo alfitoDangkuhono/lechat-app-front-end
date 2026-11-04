@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import ChatAvatar from '../../chat/components/ChatAvatar'
 import ChatIcon from '../../chat/components/ChatIcon'
 
-function ContactDetails({ chat, onClose, onViewMedia, onFileAction, onCall }) {
+function ContactDetails({ chat, onClose, onViewMedia, onFileAction, onCall, onInviteMember }) {
+  const [userId, setUserId] = useState('')
   const statusLabel = chat.status === 'online'
     ? 'Aktif sekarang'
     : chat.status === 'group'
@@ -39,6 +41,28 @@ function ContactDetails({ chat, onClose, onViewMedia, onFileAction, onCall }) {
         </div>
         <span className="media-caption">12 foto · 3 dokumen</span>
       </div>
+      {chat.status === 'group' && (
+        <form
+          className="detail-section"
+          onSubmit={async (event) => {
+            event.preventDefault()
+            const invited = await onInviteMember(userId)
+            if (invited) setUserId('')
+          }}
+        >
+          <div className="detail-section-title"><strong>Undang anggota</strong></div>
+          <label>
+            ID pengguna
+            <input
+              inputMode="numeric"
+              value={userId}
+              onChange={(event) => setUserId(event.target.value)}
+              required
+            />
+          </label>
+          <button className="text-button" type="submit">Kirim undangan</button>
+        </form>
+      )}
       <div className="detail-section shared-files">
         <div className="detail-section-title"><strong>File dibagikan</strong><button className="more-button" type="button" aria-label="Opsi file" onClick={onFileAction}><ChatIcon name="more" size={18} /></button></div>
         <button className="file-card" type="button" onClick={onFileAction}>

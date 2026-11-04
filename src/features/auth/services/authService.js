@@ -1,11 +1,10 @@
 import axios from 'axios'
-import api from '../../../services/api'
+import api, { refreshAuthSession } from '../../../services/api'
 import {
   clearAuthTokens,
   getAuthToken,
   getRefreshToken,
-  saveAuthToken,
-  saveRefreshToken,
+  saveAuthTokens,
 } from './authTokenService'
 
 function toAuthError(error, fallbackMessage) {
@@ -24,12 +23,16 @@ function toAuthError(error, fallbackMessage) {
   return new Error(message, { cause: error })
 }
 
+function storeSession(response) {
+  const tokens = response.data?.data
+  saveAuthTokens(tokens?.token, tokens?.refresh_token)
+  return response.data
+}
+
 export async function loginUser(credentials) {
   try {
     const response = await api.post('/sessions', credentials)
-    saveAuthToken(response.data?.data?.token)
-    saveRefreshToken(response.data?.data?.refresh_token)
-    return response.data
+    return storeSession(response)
   } catch (error) {
     throw toAuthError(error, 'Login gagal. Periksa email dan kata sandi Anda.')
   }
@@ -41,46 +44,31 @@ export async function refreshAuthToken(refreshToken = getRefreshToken()) {
   }
 
   try {
-    const response = await api.post('/sessions/refresh', null, {
-      headers: {
-        Authorization: `Bearer ${refreshToken}`,
-        Accept: 'application/json',
-      },
-    })
-    saveAuthToken(response.data?.data?.token)
-    if (response.data?.data?.refresh_token) {
-      saveRefreshToken(response.data.data.refresh_token)
-    }
-    return response.data
+    return await refreshAuthSession(refreshToken)
   } catch (error) {
     if (axios.isAxiosError(error) && [401, 419].includes(error.response?.status)) {
       clearAuthTokens()
     }
 
-    throw error
+    throw toAuthError(error, 'Sesi tidak dapat diperbarui. Silakan login kembali.')
   }
 }
 
-export async function checkLogin(token) {
+export async function checkLogin(token = getAuthToken()) {
+  if (!token) {
+    clearAuthTokens()
+    return false
+  }
+
   try {
     await api.get('/sessions/check-session', {
       headers: {
         Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
       },
     })
     return true
   } catch (error) {
-    if (!axios.isAxiosError(error) || error.response?.status !== 401) {
-      throw toAuthError(error, 'Sesi tidak dapat diverifikasi. Silakan coba lagi.')
-    }
-  }
-
-  try {
-    await refreshAuthToken()
-    return true
-  } catch (error) {
-    if (axios.isAxiosError(error) && [401, 419].includes(error.response?.status)) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
       clearAuthTokens()
       return false
     }
@@ -94,19 +82,19 @@ export async function logoutUser() {
   const refreshToken = getRefreshToken()
 
   if (!token) {
-    throw new Error('Token autentikasi tidak ditemukan. Silakan login kembali.')
+    clearAuthTokens()
+    return null
   }
 
   try {
-    let response
-
     try {
-      response = await api.delete('/sessions', {
+      const response = await api.delete('/sessions', {
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
         },
       })
+      clearAuthTokens()
+      return response.data
     } catch (error) {
       if (!axios.isAxiosError(error) || error.response?.status !== 401 || !refreshToken) {
         throw error
@@ -114,17 +102,16 @@ export async function logoutUser() {
 
       await refreshAuthToken(refreshToken)
       const refreshedAccessToken = getAuthToken()
-      response = await api.delete('/sessions', {
+      const response = await api.delete('/sessions', {
         headers: {
           Authorization: `Bearer ${refreshedAccessToken}`,
-          Accept: 'application/json',
         },
       })
+      clearAuthTokens()
+      return response.data
     }
-
-    clearAuthTokens()
-    return response.data
   } catch (error) {
+    clearAuthTokens()
     throw toAuthError(error, 'Logout gagal. Silakan coba lagi.')
   }
 }
@@ -132,11 +119,7 @@ export async function logoutUser() {
 export async function registerUser(registration) {
   try {
     const response = await api.post('/registers', registration)
-    saveAuthToken(response.data?.data?.token)
-    if (response.data?.data?.refresh_token) {
-      saveRefreshToken(response.data.data.refresh_token)
-    }
-    return response.data
+    return storeSession(response)
   } catch (error) {
     throw toAuthError(error, 'Pendaftaran gagal. Silakan coba lagi.')
   }

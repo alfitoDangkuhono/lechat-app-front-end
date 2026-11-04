@@ -89,6 +89,24 @@
   border-color: #8fa891;
 }
 
+.contact-phone-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 9px;
+  color: #647568;
+  font-size: 9px;
+  line-height: 1.5;
+  background: #edf2ed;
+  border: 1px solid #e3ebe2;
+  border-radius: 7px;
+}
+
+.contact-phone-hint svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
 .add-contact-actions {
   display: flex;
   justify-content: flex-end;
@@ -147,6 +165,35 @@
   overflow-y: auto;
 }
 
+.contact-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.contact-action-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border-radius: 9px;
+}
+
+.contact-action-item .contact-list-copy { gap: 4px; }
+.contact-action-item .text-button { flex: 0 0 auto; padding: 3px; font-size: 9px; }
+.contact-action-item .contact-reject-button { color: #b94d45; }
+.contact-action-item .contact-reject-button:hover { color: #963b35; }
+
+.contact-pending-badge {
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  color: #806b35;
+  font-size: 8px;
+  font-weight: 650;
+  background: #f7f0dc;
+  border-radius: 6px;
+}
+
 .contact-list-item {
   display: flex;
   width: 100%;
@@ -201,12 +248,16 @@
 .app-shell[data-theme="dark"] .contact-list-copy strong { color: #d2d9d0; }
 .app-shell[data-theme="dark"] .contacts-summary small,
 .app-shell[data-theme="dark"] .contacts-section-heading { color: #9ca69b; }
+.app-shell[data-theme="dark"] .contact-pending-badge { color: #e0cc8f; background: #443d2b; }
+.app-shell[data-theme="dark"] .contact-action-item .contact-reject-button { color: #f08a80; }
+.app-shell[data-theme="dark"] .contact-action-item .contact-reject-button:hover { color: #ffaaa2; }
 .app-shell[data-theme="dark"] .add-contact-trigger { color: #c0d3c0; background: #2d392e; border-color: #3a483b; }
 .app-shell[data-theme="dark"] .add-contact-trigger:hover { background: #344235; }
 .app-shell[data-theme="dark"] .add-contact-form { background: #222a23; border-color: #3a433b; }
 .app-shell[data-theme="dark"] .add-contact-title,
 .app-shell[data-theme="dark"] .add-contact-form input { color: #d2d9d0; }
 .app-shell[data-theme="dark"] .add-contact-form label { color: #a6afa4; }
+.app-shell[data-theme="dark"] .contact-phone-hint { color: #b6c6b7; background: #2d392e; border-color: #3a483b; }
 .app-shell[data-theme="dark"] .add-contact-form input,
 .app-shell[data-theme="dark"] .add-contact-actions button { background: #1b211c; border-color: #414a42; }
 .app-shell[data-theme="dark"] .add-contact-actions button { color: #c1c8c0; }

@@ -3,37 +3,35 @@ import ChatAvatar from '../../chat/components/ChatAvatar'
 import ChatIcon from '../../chat/components/ChatIcon'
 import './ContactsList.css'
 
-const emptyContact = {
-  username: '',
-  fullName: '',
-  phone: '',
-  email: '',
-}
-
-function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddContact }) {
+function ContactsList({
+  contacts,
+  search,
+  onSearchChange,
+  onSelectContact,
+  onAddContact,
+  contactRequests,
+  outgoingContactRequests,
+  groupInvitations,
+  onRespondToContactRequest,
+  onRespondToGroupInvitation,
+}) {
   const [isAddFormOpen, setIsAddFormOpen] = useState(false)
-  const [contact, setContact] = useState(emptyContact)
+  const [phone, setPhone] = useState('')
   const query = search.trim().toLowerCase()
-  const contacts = chats
-    .filter((chat) => chat.status !== 'group')
-    .filter((chat) => `${chat.name} ${chat.username ?? ''} ${chat.status}`.toLowerCase().includes(query))
+  const filteredContacts = contacts
+    .filter((contact) => `${contact.name} ${contact.username ?? ''} ${contact.id}`.toLowerCase().includes(query))
     .sort((first, second) => {
       if (first.status === 'online' && second.status !== 'online') return -1
       if (second.status === 'online' && first.status !== 'online') return 1
       return first.name.localeCompare(second.name)
     })
-  const onlineCount = contacts.filter((chat) => chat.status === 'online').length
-
-  function updateContact(event) {
-    const { name, value } = event.target
-    setContact((current) => ({ ...current, [name]: value }))
-  }
+  const onlineCount = filteredContacts.filter((contact) => contact.status === 'online').length
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const wasAdded = await onAddContact(contact)
+    const wasAdded = await onAddContact({ phone })
     if (wasAdded) {
-      setContact(emptyContact)
+      setPhone('')
       setIsAddFormOpen(false)
     }
   }
@@ -42,7 +40,7 @@ function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddCon
     <>
       <div className="contacts-summary">
         <span className="contacts-summary-icon"><ChatIcon name="users" size={17} /></span>
-        <span><strong>{contacts.length} kontak</strong><small>{onlineCount} sedang online</small></span>
+        <span><strong>{filteredContacts.length} kontak</strong><small>{onlineCount} sedang online</small></span>
       </div>
 
       <button
@@ -58,57 +56,29 @@ function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddCon
 
       {isAddFormOpen && (
         <form className="add-contact-form" id="add-contact-form" onSubmit={handleSubmit}>
-          <strong className="add-contact-title">Kontak baru</strong>
+          <strong className="add-contact-title">Kirim permintaan kontak</strong>
           <label>
-            Username
+            Nomor telepon
             <input
               autoFocus
-              autoComplete="username"
-              name="username"
-              value={contact.username}
-              onChange={updateContact}
-              maxLength={30}
-              required
-            />
-          </label>
-          <label>
-            Nama lengkap
-            <input
-              autoComplete="name"
-              name="fullName"
-              value={contact.fullName}
-              onChange={updateContact}
-              maxLength={80}
-              required
-            />
-          </label>
-          <label>
-            No. handphone
-            <input
               autoComplete="tel"
-              type="tel"
+              inputMode="tel"
               name="phone"
-              value={contact.phone}
-              onChange={updateContact}
-              maxLength={20}
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              maxLength={30}
+              placeholder="081234567890"
               required
             />
           </label>
-          <label>
-            Email
-            <input
-              autoComplete="email"
-              type="email"
-              name="email"
-              value={contact.email}
-              onChange={updateContact}
-              maxLength={254}
-              required
-            />
-          </label>
+          <div className="contact-phone-hint" role="note">
+            <ChatIcon name="info" size={14} />
+            <span>Masukkan nomor persis seperti yang terdaftar, termasuk angka 0 di depan.</span>
+          </div>
           <div className="add-contact-actions">
             <button type="button" onClick={() => {
-              setContact(emptyContact)
+              setPhone('')
               setIsAddFormOpen(false)
             }}>
               Batal
@@ -116,6 +86,86 @@ function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddCon
             <button type="submit">Simpan</button>
           </div>
         </form>
+      )}
+
+      {outgoingContactRequests.length > 0 && (
+        <section className="contact-action-list" aria-label="Permintaan kontak terkirim">
+          <div className="contacts-section-heading">
+            <span>MENUNGGU PERSETUJUAN</span>
+            <span>{outgoingContactRequests.length}</span>
+          </div>
+          {outgoingContactRequests.map((request) => (
+            <div className="contact-action-item" key={request.id}>
+              <span className="contact-list-copy">
+                <strong>{request.name}</strong>
+                <small>{request.phone || (request.username ? `@${request.username}` : 'Permintaan kontak terkirim')}</small>
+              </span>
+              <span className="contact-pending-badge">Menunggu</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {contactRequests.length > 0 && (
+        <section className="contact-action-list" aria-label="Permintaan kontak">
+          <div className="contacts-section-heading">
+            <span>PERMINTAAN KONTAK</span>
+            <span>{contactRequests.length}</span>
+          </div>
+          {contactRequests.map((request) => (
+            <div className="contact-action-item" key={request.id}>
+              <span className="contact-list-copy">
+                <strong>{request.name}</strong>
+                <small>{request.username ? `@${request.username}` : `ID ${request.id}`}</small>
+              </span>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => onRespondToContactRequest(request.id, true)}
+              >
+                Terima
+              </button>
+              <button
+                className="text-button contact-reject-button"
+                type="button"
+                onClick={() => onRespondToContactRequest(request.id, false)}
+              >
+                Tolak
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {groupInvitations.length > 0 && (
+        <section className="contact-action-list" aria-label="Undangan grup">
+          <div className="contacts-section-heading">
+            <span>UNDANGAN GRUP</span>
+            <span>{groupInvitations.length}</span>
+          </div>
+          {groupInvitations.map((invitation) => (
+            <div className="contact-action-item" key={invitation.id}>
+              <span className="contact-list-copy">
+                <strong>{invitation.title}</strong>
+                <small>Undangan dari {invitation.inviterName}</small>
+              </span>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => onRespondToGroupInvitation(invitation.id, true)}
+              >
+                Terima
+              </button>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => onRespondToGroupInvitation(invitation.id, false)}
+              >
+                Tolak
+              </button>
+            </div>
+          ))}
+        </section>
       )}
 
       <label className="search-box contacts-search">
@@ -130,16 +180,16 @@ function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddCon
 
       <div className="contacts-section-heading">
         <span>SEMUA KONTAK</span>
-        <span>{contacts.length}</span>
+        <span>{filteredContacts.length}</span>
       </div>
 
       <div className="contacts-list">
-        {contacts.map((contact) => (
+        {filteredContacts.map((contact) => (
           <button
             className="contact-list-item"
             key={contact.id}
             type="button"
-            onClick={() => onSelectContact(contact.id)}
+            onClick={() => onSelectContact(contact)}
           >
             <ChatAvatar chat={contact} />
             <span className="contact-list-copy">
@@ -149,8 +199,8 @@ function ContactsList({ chats, search, onSearchChange, onSelectContact, onAddCon
             <span className={`contact-presence${contact.status === 'online' ? ' is-online' : ''}`} aria-label={contact.status === 'online' ? 'Online' : 'Offline'} />
           </button>
         ))}
-        {contacts.length === 0 && (
-          <p className="empty-state">Kontak tidak ditemukan.</p>
+        {filteredContacts.length === 0 && (
+          <p className="empty-state">{contacts.length ? 'Kontak tidak ditemukan.' : 'Belum ada kontak yang diterima.'}</p>
         )}
       </div>
     </>

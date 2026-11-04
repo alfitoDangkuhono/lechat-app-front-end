@@ -5,7 +5,6 @@ import {
   checkLogin,
   loginUser,
   logoutUser,
-  refreshAuthToken,
   registerUser,
 } from './features/auth/services/authService'
 import { clearAuthTokens, getAuthToken } from './features/auth/services/authTokenService'
@@ -18,6 +17,18 @@ function App() {
   const [authPage, setAuthPage] = useState('login')
   const [sessionCheckError, setSessionCheckError] = useState('')
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0)
+  const [authNotice, setAuthNotice] = useState('')
+
+  useEffect(() => {
+    function handleSessionExpired() {
+      setAuthNotice('Sesi berakhir. Silakan masuk kembali.')
+      setAuthPage('login')
+      setAuthStatus('unauthenticated')
+    }
+
+    window.addEventListener('lechat:session-expired', handleSessionExpired)
+    return () => window.removeEventListener('lechat:session-expired', handleSessionExpired)
+  }, [])
 
   useEffect(() => {
     let isCurrent = true
@@ -53,29 +64,25 @@ function App() {
 
   async function handleLogin(credentials) {
     await loginUser(credentials)
-
-    try {
-      await refreshAuthToken()
-    } catch (error) {
-      const message = error?.response?.data?.message
-      throw new Error(
-        typeof message === 'string' && message
-          ? message
-          : 'Token autentikasi gagal diperbarui. Silakan coba lagi.',
-        { cause: error },
-      )
-    }
-
+    setAuthNotice('')
     setAuthStatus('authenticated')
   }
 
   async function handleRegister(registration) {
     await registerUser(registration)
+    setAuthNotice('')
     setAuthStatus('authenticated')
   }
 
   async function handleLogout() {
-    await logoutUser()
+    try {
+      await logoutUser()
+      setAuthNotice('')
+    } catch (error) {
+      setAuthNotice(error instanceof Error && error.message
+        ? error.message
+        : 'Logout gagal. Token lokal telah dihapus.')
+    }
     setAuthPage('login')
     setAuthStatus('unauthenticated')
   }
@@ -143,6 +150,7 @@ function App() {
       <LoginPage
         onLogin={handleLogin}
         onRegister={() => setAuthPage('register')}
+        notice={authNotice}
       />
     )
   }
