@@ -15,10 +15,6 @@ function getWebSocketUrl() {
 }
 
 export function connectWebSocket({ conversationId, onEvent, onStatus }) {
-  if (!conversationId) {
-    throw new Error('ID percakapan wajib diisi untuk koneksi WebSocket.')
-  }
-
   let socket = null
   let disposed = false
   let joined = false
@@ -95,12 +91,17 @@ export function connectWebSocket({ conversationId, onEvent, onStatus }) {
       }
 
       if (event.type === 'auth.ok') {
-        onStatus?.('joining')
-        socket.send(JSON.stringify({
-          type: 'conversation.join',
-          conversation_id: conversationId,
-          limit: 50,
-        }))
+        if (conversationId) {
+          onStatus?.('joining')
+          socket.send(JSON.stringify({
+            type: 'conversation.join',
+            conversation_id: conversationId,
+            limit: 50,
+          }))
+        } else {
+          retryCount = 0
+          onStatus?.('connected')
+        }
       }
 
       if (event.type === 'conversation.history' && event.data?.joined === true) {

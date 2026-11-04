@@ -7,6 +7,7 @@ function PersonalProfile({
   isLoading,
   loadError,
   onRetry,
+  onSettingsClick,
   onClose,
   onLogout,
 }) {
@@ -33,9 +34,14 @@ function PersonalProfile({
     <aside className="details-panel personal-profile-panel" id="personal-profile-panel" aria-label="Profil pribadi">
       <div className="details-topline">
         <span>PROFIL PRIBADI</span>
-        <button className="icon-button" type="button" aria-label="Tutup profil pribadi" onClick={onClose}>
-          <ChatIcon name="close" size={18} />
-        </button>
+        <div className="profile-panel-actions">
+          <button className="icon-button" type="button" aria-label="Buka pengaturan" onClick={onSettingsClick}>
+            <ChatIcon name="settings" size={18} />
+          </button>
+          <button className="icon-button" type="button" aria-label="Tutup profil pribadi" onClick={onClose}>
+            <ChatIcon name="close" size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="personal-profile-card">

@@ -1,18 +1,15 @@
 import { useState } from 'react'
 import ChatAvatar from './ChatAvatar'
-import ChatIcon from './ChatIcon'
 
 function ChatHeader({
   chat,
   onBack,
   onProfileClick,
   onPersonalProfileClick,
-  onSettingsClick,
   onArchiveChat,
   onNotice,
   isProfileExpanded,
   isPersonalProfileExpanded,
-  isSettingsExpanded,
   profileInitials,
 }) {
   const [showActions, setShowActions] = useState(false)
@@ -69,16 +66,6 @@ function ChatHeader({
           onClick={onPersonalProfileClick}
         >
           <span className="avatar avatar-profile">{profileInitials}</span>
-        </button>
-        <button
-          className={`icon-button mobile-list-action${isSettingsExpanded ? ' active' : ''}`}
-          type="button"
-          aria-label="Buka pengaturan"
-          aria-expanded={isSettingsExpanded}
-          aria-controls="settings-panel"
-          onClick={onSettingsClick}
-        >
-          <ChatIcon name="settings" size={19} />
         </button>
         <button
           className="icon-button"

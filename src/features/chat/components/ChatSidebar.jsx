@@ -15,7 +15,6 @@ function ChatSidebar({
   search,
   showConversations,
   isProfileExpanded,
-  isSettingsExpanded,
   profileInitials,
   activeView,
   onFilterChange,
@@ -34,7 +33,6 @@ function ChatSidebar({
   onSelectChat,
   onSelectContact,
   onProfileClick,
-  onSettingsClick,
 }) {
   const unreadTotal = chats.filter((chat) => !chat.archived && chat.unread > 0).length
   const outgoingRequestCount = outgoingContactRequests.length
@@ -100,16 +98,6 @@ function ChatSidebar({
             <ChatIcon name="archive" />
           </button>
           <button
-            className={`rail-button${isSettingsExpanded ? ' active' : ''}`}
-            type="button"
-            aria-label="Buka pengaturan"
-            aria-expanded={isSettingsExpanded}
-            aria-controls="settings-panel"
-            onClick={onSettingsClick}
-          >
-            <ChatIcon name="settings" />
-          </button>
-          <button
             className="avatar avatar-profile profile-rail-trigger"
             type="button"
             aria-label="Buka profil pribadi"
@@ -138,19 +126,6 @@ function ChatSidebar({
               onClick={onProfileClick}
             >
               <span className="avatar avatar-profile">{profileInitials}</span>
-            </button>
-            <button
-              className={`icon-button mobile-list-action${isSettingsExpanded ? ' active' : ''}`}
-              type="button"
-              aria-label="Buka pengaturan"
-              aria-expanded={isSettingsExpanded}
-              aria-controls="settings-panel"
-              onClick={onSettingsClick}
-            >
-              <ChatIcon name="settings" size={19} />
-            </button>
-            <button className="icon-button new-chat-button" type="button" aria-label="Buat percakapan baru" onClick={onNewChat} disabled={isLoading}>
-              <ChatIcon name="plus" size={19} />
             </button>
           </div>
         </div>
@@ -313,6 +288,15 @@ function ChatSidebar({
             </div>
           </>
         )}
+        <button
+          className="new-chat-button floating-new-chat-button"
+          type="button"
+          aria-label="Buat grup baru"
+          onClick={onNewChat}
+          disabled={isLoading}
+        >
+          <ChatIcon name="plus" size={22} />
+        </button>
       </aside>
     </>
   )
