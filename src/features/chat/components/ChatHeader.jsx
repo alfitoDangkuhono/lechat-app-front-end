@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import ChatAvatar from './ChatAvatar'
+import ChatIcon from './ChatIcon'
 
 function ChatHeader({
   chat,
   onBack,
   onProfileClick,
+  onPersonalProfileClick,
+  onSettingsClick,
   onArchiveChat,
   onNotice,
   isProfileExpanded,
+  isPersonalProfileExpanded,
+  isSettingsExpanded,
+  profileInitials,
 }) {
   const [showActions, setShowActions] = useState(false)
 
@@ -28,10 +34,16 @@ function ChatHeader({
       >
         <ChatAvatar chat={chat} />
         <span className="header-contact">
-          <strong>{chat.name}</strong>
-          <span>
+          <span className="header-title-row">
+            <strong>{chat.name}</strong>
+          </span>
+          <span className="header-presence">
             <i className={chat.status === 'online' ? 'status-dot' : 'status-dot status-dot-muted'} />
-            {chat.status === 'online' ? 'Online' : chat.status === 'group' ? '5 anggota' : 'Terakhir dilihat hari ini'}
+            {chat.status === 'online'
+              ? 'Online'
+              : chat.status === 'group'
+                ? `${chat.members?.length ?? chat.member_count ?? 0} anggota`
+                : 'Terakhir dilihat hari ini'}
           </span>
         </span>
       </button>
@@ -41,13 +53,33 @@ function ChatHeader({
             <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7l.4 2.8a2 2 0 0 1-.6 1.7L7.6 9.5a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 1.7-.6l2.8.4a2 2 0 0 1 1.6 2.9Z" />
           </svg>
         </button>
-        <button className="icon-button" type="button" aria-label="Panggilan video" onClick={() => onNotice('Fitur panggilan video belum terhubung ke layanan.')}>
+        <button className="icon-button video-call-button" type="button" aria-label="Panggilan video" onClick={() => onNotice('Fitur panggilan video belum terhubung ke layanan.')}>
           <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="5" width="13" height="14" rx="2" />
             <path d="m16 10 5-3v10l-5-3" />
           </svg>
         </button>
         <span className="header-action-divider" />
+        <button
+          className={`icon-button mobile-list-action${isPersonalProfileExpanded ? ' active' : ''}`}
+          type="button"
+          aria-label="Buka profil pribadi"
+          aria-expanded={isPersonalProfileExpanded}
+          aria-controls="personal-profile-panel"
+          onClick={onPersonalProfileClick}
+        >
+          <span className="avatar avatar-profile">{profileInitials}</span>
+        </button>
+        <button
+          className={`icon-button mobile-list-action${isSettingsExpanded ? ' active' : ''}`}
+          type="button"
+          aria-label="Buka pengaturan"
+          aria-expanded={isSettingsExpanded}
+          aria-controls="settings-panel"
+          onClick={onSettingsClick}
+        >
+          <ChatIcon name="settings" size={19} />
+        </button>
         <button
           className="icon-button"
           type="button"

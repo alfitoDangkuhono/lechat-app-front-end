@@ -1,164 +1,362 @@
-import { initialChats } from '../chatData.js'
+import api from '../../../services/api'
+import { getAuthToken } from '../../auth/services/authTokenService'
 
-let conversations = initialChats.map(cloneConversation)
+const ARCHIVED_CONVERSATIONS_KEY = 'lechat-archived-conversations'
+const COLORS = ['peach', 'violet', 'blue', 'green', 'yellow']
 
-function cloneConversation(conversation) {
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message) => ({
-      ...message,
-      ...(message.attachments ? { attachments: [...message.attachments] } : {}),
-    })),
+function responseData(response) {
+  return response.data?.data ?? response.data
+}
+
+function listFromResponse(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.conversations)) return data.conversations
+  if (Array.isArray(data?.contacts)) return data.contacts
+  if (Array.isArray(data?.invitations)) return data.invitations
+  if (Array.isArray(data?.requests)) return data.requests
+  return []
+}
+
+function archivedIds() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ARCHIVED_CONVERSATIONS_KEY) ?? '[]')
+    return new Set(Array.isArray(stored) ? stored.map(String) : [])
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error
+    localStorage.removeItem(ARCHIVED_CONVERSATIONS_KEY)
+    return new Set()
   }
 }
 
-function findConversation(conversationId) {
-  const conversation = conversations.find((item) => item.id === conversationId)
-  if (!conversation) {
-    throw new Error('Percakapan tidak ditemukan.')
-  }
-  return conversation
+function saveArchivedIds(ids) {
+  localStorage.setItem(ARCHIVED_CONVERSATIONS_KEY, JSON.stringify([...ids]))
 }
 
-function getCurrentTime() {
+function getUserIdFromToken() {
+  const token = getAuthToken()
+  if (!token) return null
+
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const base64Payload = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const decoded = JSON.parse(atob(base64Payload.padEnd(Math.ceil(base64Payload.length / 4) * 4, '=')))
+    return decoded.sub ?? decoded.user_id ?? decoded.id ?? null
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof DOMException) return null
+    throw error
+  }
+}
+
+function formatTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
   return new Intl.DateTimeFormat('id-ID', {
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date())
+  }).format(date)
 }
 
-function createId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+function otherMember(conversation) {
+  const members = Array.isArray(conversation.members) ? conversation.members : []
+  const userId = getUserIdFromToken()
+  return members.find((member) => (
+    member.is_self || member.is_me || member.is_current_user
+      ? false
+      : userId !== null && String(member.user_id ?? member.user?.id ?? member.id) === String(userId)
+        ? false
+        : true
+  ))
+}
+
+function memberUserId(member) {
+  return member.user_id
+    ?? member.user?.user_id
+    ?? member.user?.id
+    ?? member.id
+}
+
+function conversationHasMember(conversation, userId) {
+  const members = Array.isArray(conversation.members) ? conversation.members : []
+  return members.some((member) => String(memberUserId(member)) === String(userId))
+}
+
+function findDirectConversation(conversations, userId) {
+  return conversations.find((conversation) => (
+    conversation.type !== 'group' && conversationHasMember(conversation, userId)
+  ))
+}
+
+function lastMessageFor(conversation) {
+  return conversation.last_message
+    ?? conversation.lastMessage
+    ?? conversation.latest_message
+    ?? conversation.latestMessage
+    ?? null
+}
+
+function lastMessageText(message) {
+  if (typeof message === 'string') return message
+  if (!message || typeof message !== 'object') return ''
+
+  const content = message.body
+    ?? message.content
+    ?? message.text
+    ?? message.message
+    ?? message.message_text
+  if (typeof content === 'string') return content
+  if (content && typeof content === 'object') return lastMessageText(content)
+  return ''
+}
+
+export function mapConversation(conversation, index = 0) {
+  const member = otherMember(conversation)
+  const rawId = conversation.id ?? conversation.conversation_id
+  const id = rawId ?? `conversation-${index}`
+  const title = conversation.title
+    || member?.name
+    || member?.full_name
+    || member?.username
+    || 'Percakapan'
+  const lastMessage = lastMessageFor(conversation)
+  const preview = lastMessageText(lastMessage)
+    || conversation.last_message_text
+    || conversation.last_message_body
+    || 'Belum ada pesan'
+  const colors = COLORS
+  const colorIndex = [...String(id)].reduce((total, character) => total + character.charCodeAt(0), 0)
+    % colors.length
+  const isGroup = conversation.type === 'group'
+
+  return {
+    ...conversation,
+    id,
+    name: title,
+    initials: title.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+    color: colors[colorIndex],
+    status: isGroup ? 'group' : 'offline',
+    preview,
+    time: formatTime(
+      lastMessage?.created_at
+      ?? lastMessage?.sent_at
+      ?? conversation.updated_at
+      ?? conversation.created_at,
+    ),
+    unread: Number(conversation.unread_message_count ?? conversation.unread ?? 0),
+    archived: archivedIds().has(String(id)),
+    messages: [],
+  }
+}
+
+export function mapMessage(message) {
+  const sender = message.sender ?? message.user ?? {}
+  const senderId = message.sender_id ?? message.user_id ?? sender.id
+  const currentUserId = getUserIdFromToken()
+  const from = message.is_own
+    || message.is_mine
+    || message.is_self
+    || sender.is_self
+    || (currentUserId !== null && senderId !== undefined && String(senderId) === String(currentUserId))
+    ? 'me'
+    : 'them'
+
+  return {
+    ...message,
+    id: message.id ?? message.client_message_id,
+    from,
+    author: sender.name ?? sender.full_name ?? message.author ?? '',
+    text: message.body ?? message.content ?? message.text ?? '',
+    time: formatTime(message.created_at ?? message.time),
+  }
 }
 
 async function listConversations() {
-  return conversations.map(cloneConversation)
+  const response = await api.get('/conversations')
+  return listFromResponse(responseData(response)).map(mapConversation)
 }
 
-async function createConversation({ name, type = 'contact' }) {
-  const normalizedName = name.trim()
-  if (!normalizedName) {
-    throw new Error('Nama percakapan wajib diisi.')
-  }
-
-  const existing = conversations.find((conversation) => (
-    conversation.name.toLowerCase() === normalizedName.toLowerCase()
-  ))
-  if (existing) {
-    existing.archived = false
-    return { conversation: cloneConversation(existing), created: false }
-  }
-
-  const colorOptions = ['peach', 'violet', 'blue', 'green', 'yellow']
-  const conversation = {
-    id: createId(),
-    name: normalizedName,
-    initials: normalizedName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
-    color: colorOptions[conversations.length % colorOptions.length],
-    status: type === 'group' ? 'group' : 'offline',
-    preview: 'Percakapan baru',
-    time: '',
-    unread: 0,
-    archived: false,
-    messages: [],
-  }
-
-  conversations = [conversation, ...conversations]
-  return { conversation: cloneConversation(conversation), created: true }
+async function listContacts() {
+  const response = await api.get('/contacts')
+  return listFromResponse(responseData(response)).map((contact) => ({
+    ...contact,
+    id: contact.user_id ?? contact.id,
+    name: contact.name ?? contact.full_name ?? contact.username ?? 'Kontak',
+    username: contact.username ?? '',
+    initials: (contact.name ?? contact.full_name ?? contact.username ?? 'K')
+      .split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+    color: COLORS[String(contact.user_id ?? contact.id).length % COLORS.length],
+    status: contact.online || contact.is_online || contact.status === 'online'
+      ? 'online'
+      : 'offline',
+  }))
 }
 
-async function addContact({ username, fullName, phone, email }) {
-  const normalizedUsername = username.trim()
-  const normalizedName = fullName.trim()
-  const normalizedPhone = phone.trim()
-  const normalizedEmail = email.trim()
+async function listContactRequests() {
+  const response = await api.get('/contacts/requests')
+  const data = responseData(response)
+  const allRequests = listFromResponse(data)
+  const incoming = Array.isArray(data?.incoming)
+    ? data.incoming
+    : allRequests.filter((request) => request.direction === 'incoming')
+  const outgoing = Array.isArray(data?.outgoing)
+    ? data.outgoing
+    : allRequests.filter((request) => request.direction === 'outgoing')
 
-  if (!normalizedUsername || !normalizedName || !normalizedPhone || !normalizedEmail) {
-    throw new Error('Semua data kontak wajib diisi.')
-  }
-  if (conversations.some((conversation) => (
-    conversation.username?.toLowerCase() === normalizedUsername.toLowerCase()
-  ))) {
-    throw new Error('Username tersebut sudah digunakan.')
-  }
+  function mapRequest(request, direction) {
+    const user = direction === 'incoming'
+      ? request.user ?? request.sender ?? request
+      : request.user ?? request.recipient ?? request.receiver ?? request
+    const userId = request.user_id ?? user.user_id ?? user.id ?? request.id
+    const phone = request.phone ?? user.phone ?? user.handphone ?? ''
 
-  const colorOptions = ['peach', 'violet', 'blue', 'green', 'yellow']
-  const contact = {
-    id: createId(),
-    name: normalizedName,
-    username: normalizedUsername,
-    phone: normalizedPhone,
-    email: normalizedEmail,
-    initials: normalizedName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
-    color: colorOptions[conversations.length % colorOptions.length],
-    status: 'offline',
-    preview: 'Kontak baru',
-    time: '',
-    unread: 0,
-    archived: false,
-    messages: [],
+    return {
+      ...request,
+      id: userId ?? request.request_id ?? request.id ?? phone,
+      name: user.name ?? user.full_name ?? user.username ?? (phone || 'Pengguna'),
+      username: user.username ?? '',
+      phone,
+      direction,
+    }
   }
 
-  conversations = [contact, ...conversations]
-  return cloneConversation(contact)
+  return {
+    incoming: incoming.map((request) => mapRequest(request, 'incoming')),
+    outgoing: outgoing.map((request) => mapRequest(request, 'outgoing')),
+  }
 }
 
-async function markConversationRead(conversationId) {
-  const conversation = findConversation(conversationId)
-  conversation.unread = 0
-  return cloneConversation(conversation)
+async function listGroupInvitations() {
+  const response = await api.get('/group-invitations')
+  const data = responseData(response)
+  return listFromResponse(data).map((invitation) => ({
+    ...invitation,
+    id: invitation.invitation_id ?? invitation.id,
+    title: invitation.conversation?.title ?? invitation.title ?? 'Grup',
+    inviterName: invitation.inviter?.name
+      ?? invitation.inviter?.full_name
+      ?? invitation.inviter_name
+      ?? 'Pengguna',
+  }))
 }
 
-async function sendMessage(conversationId, { text = '', attachments = [] }) {
-  const conversation = findConversation(conversationId)
-  const normalizedText = text.trim()
-  if (!normalizedText && attachments.length === 0) {
-    throw new Error('Pesan atau lampiran wajib diisi.')
+async function requestContact(phone) {
+  if (typeof phone !== 'string' || !phone.trim()) {
+    throw new Error('Nomor telepon wajib diisi.')
+  }
+  return api.post('/contacts/requests', { phone })
+}
+
+async function respondToContactRequest(userId, accepted) {
+  const normalizedId = encodeURIComponent(String(userId).trim())
+  if (!normalizedId) throw new Error('ID pengguna wajib diisi.')
+  return accepted
+    ? api.post(`/contacts/${normalizedId}/accept`)
+    : api.delete(`/contacts/${normalizedId}/requests`)
+}
+
+async function respondToGroupInvitation(invitationId, accepted) {
+  const normalizedId = encodeURIComponent(String(invitationId).trim())
+  if (!normalizedId) throw new Error('ID undangan wajib diisi.')
+  return accepted
+    ? api.post(`/group-invitations/${normalizedId}/accept`)
+    : api.delete(`/group-invitations/${normalizedId}`)
+}
+
+async function inviteToGroup(conversationId, userId) {
+  const normalizedUserId = String(userId).trim()
+  if (!normalizedUserId) throw new Error('ID pengguna wajib diisi.')
+  return api.post(
+    `/conversations/${encodeURIComponent(conversationId)}/invitations`,
+    { user_id: /^\d+$/.test(normalizedUserId) ? Number(normalizedUserId) : normalizedUserId },
+  )
+}
+
+async function createConversation({ type = 'direct', memberIds = [], title, contact }) {
+  if (!memberIds.length) {
+    throw new Error('Pilih setidaknya satu anggota selain diri sendiri.')
   }
 
-  const time = getCurrentTime()
-  const preview = normalizedText || attachments.map((file) => file.name).join(', ')
-  const updatedConversation = {
-    ...conversation,
-    preview,
-    time,
-    messages: [
-      ...conversation.messages,
-      {
-        id: createId(),
-        from: 'me',
-        text: normalizedText,
-        time,
-        attachments: [...attachments],
-      },
-    ],
+  const response = await api.post('/conversations', {
+    type,
+    member_ids: memberIds,
+    ...(type === 'group' && title?.trim() ? { title: title.trim() } : {}),
+  })
+  const data = responseData(response)
+  const conversation = data?.conversation ?? data
+  if (!conversation?.id) {
+    throw new Error('Respons backend tidak berisi percakapan yang valid.')
   }
 
-  conversations = [
-    updatedConversation,
-    ...conversations.filter((item) => item.id !== conversationId),
-  ]
-  return cloneConversation(updatedConversation)
+  const mappedConversation = mapConversation(conversation)
+
+  return {
+    conversation: type === 'direct' && contact?.name
+      ? {
+        ...mappedConversation,
+        name: contact.name,
+        initials: contact.initials
+          ?? contact.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+        color: contact.color ?? mappedConversation.color,
+      }
+      : mappedConversation,
+    created: data?.created ?? true,
+  }
+}
+
+async function loadMessages(conversationId, { limit = 50, beforeId } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (beforeId) query.set('before_id', String(beforeId))
+
+  const response = await api.get(
+    `/conversations/${encodeURIComponent(conversationId)}/messages?${query}`,
+  )
+  const data = responseData(response)
+  const items = Array.isArray(data?.items) ? data.items : []
+
+  return {
+    items: items.map(mapMessage).reverse(),
+    nextBeforeId: data?.next_before_id ?? null,
+  }
+}
+
+async function markConversationRead(conversationId, throughMessageId) {
+  if (!throughMessageId) return
+  await api.post(
+    `/conversations/${encodeURIComponent(conversationId)}/read`,
+    { through_message_id: throughMessageId },
+  )
 }
 
 async function archiveConversation(conversationId) {
-  const conversation = findConversation(conversationId)
-  conversation.archived = true
-  return cloneConversation(conversation)
+  const ids = archivedIds()
+  ids.add(String(conversationId))
+  saveArchivedIds(ids)
+  return { id: conversationId, archived: true }
 }
 
 async function restoreConversation(conversationId) {
-  const conversation = findConversation(conversationId)
-  conversation.archived = false
-  return cloneConversation(conversation)
+  const ids = archivedIds()
+  ids.delete(String(conversationId))
+  saveArchivedIds(ids)
+  return { id: conversationId, archived: false }
 }
 
 export const chatService = {
   listConversations,
+  listContacts,
+  listContactRequests,
+  listGroupInvitations,
+  requestContact,
+  respondToContactRequest,
+  respondToGroupInvitation,
+  inviteToGroup,
   createConversation,
-  addContact,
+  findDirectConversation,
+  loadMessages,
   markConversationRead,
-  sendMessage,
+  mapMessage,
   archiveConversation,
   restoreConversation,
 }

@@ -8,20 +8,43 @@ function ChatWindow({
   message,
   onBack,
   onProfileClick,
+  onPersonalProfileClick,
+  onSettingsClick,
   onArchiveChat,
   onNotice,
   readReceiptsEnabled,
   isProfileExpanded,
+  isPersonalProfileExpanded,
+  isSettingsExpanded,
+  profileInitials,
+  socketStatus,
   onMessageChange,
   onSendMessage,
+  hasOlderMessages,
+  isLoadingOlder,
+  onLoadOlder,
 }) {
   const [attachments, setAttachments] = useState([])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
+  const previousMessagesRef = useRef({ count: chat?.messages?.length ?? 0, firstId: chat?.messages?.[0]?.id })
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const messages = chat?.messages ?? []
+    const previous = previousMessagesRef.current
+    const prependedMessages = previous.count > 0
+      && messages.length > previous.count
+      && messages[0]?.id !== previous.firstId
+
+    if (!prependedMessages) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+
+    previousMessagesRef.current = {
+      count: messages.length,
+      firstId: messages[0]?.id,
+    }
   }, [chat?.messages])
 
   if (!chat) {
@@ -34,6 +57,12 @@ function ChatWindow({
   }
 
   async function handleSubmit(event) {
+    event.preventDefault()
+    if (attachments.length > 0) {
+      onNotice('Backend saat ini hanya mendukung pesan teks; lampiran belum tersedia.')
+      return
+    }
+
     try {
       await onSendMessage(event, attachments)
       setAttachments([])
@@ -55,13 +84,28 @@ function ChatWindow({
         chat={chat}
         onBack={onBack}
         onProfileClick={onProfileClick}
+        onPersonalProfileClick={onPersonalProfileClick}
+        onSettingsClick={onSettingsClick}
         onArchiveChat={onArchiveChat}
         onNotice={onNotice}
         isProfileExpanded={isProfileExpanded}
+        isPersonalProfileExpanded={isPersonalProfileExpanded}
+        isSettingsExpanded={isSettingsExpanded}
+        profileInitials={profileInitials}
       />
 
       <div className="chat-content">
         <div className="day-divider"><span>HARI INI</span></div>
+        {hasOlderMessages && (
+          <button
+            className="text-button"
+            type="button"
+            onClick={onLoadOlder}
+            disabled={isLoadingOlder}
+          >
+            {isLoadingOlder ? 'Memuat pesan...' : 'Muat pesan sebelumnya'}
+          </button>
+        )}
         <div className="message-list">
           {chat.messages.map((item) => (
             <div
@@ -85,11 +129,6 @@ function ChatWindow({
               </div>
             </div>
           ))}
-        </div>
-        <div className="typing-indicator">
-          <ChatAvatar chat={chat} small />
-          <span className="typing-dots"><i /><i /><i /></span>
-          <span>{chat.status === 'online' ? `${chat.name.split(' ')[0]} sedang mengetik` : 'Pesan terbaru'}</span>
         </div>
         <div ref={messagesEndRef} />
       </div>
@@ -148,7 +187,9 @@ function ChatWindow({
         <button className="send-button" type="submit" aria-label="Kirim pesan" disabled={!message.trim() && attachments.length === 0}>
           <ChatIcon name="send" size={18} />
         </button>
-        <span className="composer-hint">Tekan <kbd>Enter</kbd> untuk mengirim</span>
+        <span className="composer-hint">
+          {socketStatus === 'connected' ? <>Tekan <kbd>Enter</kbd> untuk mengirim</> : 'Pesan akan dikirim saat koneksi siap'}
+        </span>
       </form>
     </section>
   )

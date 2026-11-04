@@ -54,6 +54,20 @@ export function saveRefreshToken(token) {
   saveTokenCookie(REFRESH_TOKEN_COOKIE, token, 'refresh')
 }
 
+export function saveAuthTokens(accessToken, refreshToken) {
+  if (
+    typeof accessToken !== 'string'
+    || !accessToken
+    || typeof refreshToken !== 'string'
+    || !refreshToken
+  ) {
+    throw new Error('Pasangan token autentikasi tidak valid.')
+  }
+
+  saveAuthToken(accessToken)
+  saveRefreshToken(refreshToken)
+}
+
 export function getRefreshToken() {
   return getTokenCookie(REFRESH_TOKEN_COOKIE)
 }

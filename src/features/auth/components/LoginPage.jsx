@@ -2,7 +2,7 @@ import { useState } from 'react'
 import AuthLayout from './AuthLayout'
 import usePasswordVisibility from '../hooks/usePasswordVisibility'
 
-function LoginPage({ onLogin, onRegister }) {
+function LoginPage({ onLogin, onRegister, notice }) {
   const { isVisible: showPassword, toggleVisibility: togglePasswordVisibility } = usePasswordVisibility()
   const [showRecoveryNotice, setShowRecoveryNotice] = useState(false)
   const [email, setEmail] = useState('')
@@ -117,6 +117,7 @@ function LoginPage({ onLogin, onRegister }) {
       </form>
 
       {loginError && <p className="login-error" role="alert">{loginError}</p>}
+      {notice && <p className="login-error" role="status">{notice}</p>}
       <p className="login-demo-note"><span>i</span> Masuk menggunakan akun Lechat Anda.</p>
       <p className="auth-switch">Belum punya akun? <button type="button" onClick={onRegister}>Daftar sekarang</button></p>
     </AuthLayout>
