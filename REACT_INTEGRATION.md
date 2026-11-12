@@ -152,6 +152,8 @@ Refresh token bersifat sekali pakai: request refresh yang berhasil mencabut toke
 4. Jika refresh mengembalikan `401`, hapus session lokal dan arahkan pengguna untuk login lagi.
 5. Untuk `401` dari API, lakukan paling banyak satu refresh lalu retry request sekali. Jangan mengulang tanpa batas.
 
+`GET /sessions/check-session` ditangani khusus oleh `checkLogin`: jika access token ditolak melalui HTTP `401` atau envelope `data.code === 401`, lakukan satu refresh terkoordinasi lalu ulangi pemeriksaan dengan access token baru. Jangan biarkan interceptor umum dan `checkLogin` sama-sama menangani `401` endpoint ini karena refresh token hanya dapat dipakai sekali.
+
 Contoh fungsi refresh langsung:
 
 ```js
@@ -181,6 +183,27 @@ const profile = await apiRequest("/profile", {
 ```
 
 `apiRequest` mengembalikan nilai `data` dari envelope response. Gunakan field yang disediakan backend untuk menampilkan profil; jangan mengisi nilai contoh jika field tidak tersedia.
+
+Untuk mengubah profil, kirim keempat field editable sebagai string non-empty. Jangan kirim `id`, `username`, atau `email`; identitas pengguna berasal dari access token. Frontend juga perlu mencegah submit bila nilainya tidak berubah karena backend saat ini melaporkan kondisi tersebut sebagai `500`.
+
+```http
+POST /api/v1/profile
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "phone": "08123456789",
+  "about": "Hello, I'm Jane."
+}
+```
+
+Database menyimpan object key privat di `users.avatar_url`, tetapi `GET /profile` mengembalikan `data.avatar_url` sebagai presigned URL dan `data.avatar_url_expires_in` (900 detik). Gunakan `avatar_url` langsung sebagai `img src`; jangan simpan URL atau expiry-nya secara persisten. Saat URL mendekati kedaluwarsa atau gagal dimuat, panggil kembali `GET /profile` untuk memperoleh URL baru.
+
+Untuk mengunggah avatar, minta `POST /profile/avatar/upload-url` dengan `content_type` `image/jpeg`, `image/png`, atau `image/webp`, lalu kirim byte file langsung ke `upload_url` menggunakan method dan headers yang diberikan. Jangan unggah file sebagai multipart ke API backend dan jangan tambahkan bearer token ke request penyimpanan. Setelah PUT berhasil, muat ulang `GET /profile` untuk memperoleh signed `avatar_url` terbaru.
 
 ### Ambil daftar percakapan
 

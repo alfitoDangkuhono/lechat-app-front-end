@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import ChatAvatar from './ChatAvatar'
 import ChatIcon from './ChatIcon'
 import { ContactsList } from '../../contact'
+import { ProfileAvatar } from '../../profile'
 
 function ChatSidebar({
   chats,
@@ -16,6 +17,8 @@ function ChatSidebar({
   showConversations,
   isProfileExpanded,
   profileInitials,
+  profileAvatarUrl,
+  onAvatarImageError,
   activeView,
   onFilterChange,
   onViewChange,
@@ -105,7 +108,11 @@ function ChatSidebar({
             aria-controls="personal-profile-panel"
             onClick={onProfileClick}
           >
-            {profileInitials}
+            <ProfileAvatar
+              src={profileAvatarUrl}
+              initials={profileInitials}
+              onExpired={onAvatarImageError}
+            />
           </button>
         </nav>
       </aside>
@@ -125,7 +132,13 @@ function ChatSidebar({
               aria-controls="personal-profile-panel"
               onClick={onProfileClick}
             >
-              <span className="avatar avatar-profile">{profileInitials}</span>
+              <span className="avatar avatar-profile">
+                <ProfileAvatar
+                  src={profileAvatarUrl}
+                  initials={profileInitials}
+                  onExpired={onAvatarImageError}
+                />
+              </span>
             </button>
           </div>
         </div>
@@ -279,13 +292,6 @@ function ChatSidebar({
               )}
             </div>
 
-            <div className="inbox-note">
-              <span className="note-icon"><ChatIcon name="pin" size={17} /></span>
-              <div>
-                <strong>Jaga obrolan tetap dekat</strong>
-                <p>Semua percakapanmu, di satu tempat.</p>
-              </div>
-            </div>
           </>
         )}
         <button
