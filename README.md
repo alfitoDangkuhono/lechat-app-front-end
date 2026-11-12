@@ -1,6 +1,6 @@
 # Lechat
 
-Frontend aplikasi chatting Lechat dibuat dengan React dan Vite. Login, registrasi, percakapan, kontak, riwayat/pengiriman pesan, dan koneksi real-time terhubung ke REST API serta WebSocket backend. Panggilan, unggah media, dan sebagian profil/pengaturan masih berupa UI demo.
+Frontend aplikasi chatting Lechat dibuat dengan React dan Vite. Login, registrasi, percakapan, kontak, riwayat/pengiriman pesan, dan koneksi real-time terhubung ke REST API serta WebSocket backend. Profil pengguna dapat dilihat dan diperbarui, termasuk mengunggah avatar ke penyimpanan privat. Panggilan dan sebagian pengaturan masih berupa UI demo.
 
 ## Menjalankan proyek
 
@@ -42,21 +42,23 @@ REST memuat percakapan, kontak, dan riwayat; pengiriman teks memakai WebSocket s
 4. **Mendaftar** — isi nama, email, kata sandi minimal 8 karakter, konfirmasi kata sandi yang sama, dan centang persetujuan pendaftaran. Form memvalidasi dan merapikan nama/email, lalu mengirim `{ name, email, password, password_confirmation }` ke `POST /api/v1/registers`. Jika server berhasil, dashboard dibuka; pesan validasi atau kegagalan server ditampilkan pada form.
 5. **Kembali ke login** — pilih **Masuk** pada halaman registrasi.
 6. **Mengelola kata sandi di form login** — opsi **Ingat saya** dapat dipilih dan tombol ikon mata menampilkan atau menyembunyikan kata sandi. Tautan lupa kata sandi menampilkan informasi bahwa pemulihan akun belum tersedia.
-7. **Keluar** — buka profil pribadi dari navigasi, lalu pilih **Log out**. Backend mencabut access token dan frontend menghapus token lokal.
-8. **Melihat percakapan** — daftar percakapan dimuat dari backend bersama cuplikan pesan terakhir, waktu, dan jumlah pesan belum dibaca.
-9. **Mencari percakapan** — ketik nama kontak atau cuplikan pesan pada kolom pencarian. Daftar akan disaring langsung.
-10. **Melihat kontak** — pilih ikon Kontak di navigasi desktop atau tab **Kontak** pada daftar mobile. Kontak accepted dimuat dari backend; badge pada navigasi menunjukkan jumlah permintaan yang menunggu persetujuan penerima.
-11. **Membuka chat dari kontak** — pilih kontak untuk membuat atau membuka direct conversation.
-12. **Memfilter pesan** — pilih **Semua** atau **Belum dibaca**. Angka pada filter belum dibaca mengikuti jumlah percakapan yang masih memiliki pesan belum dibaca.
-13. **Membuka percakapan** — pilih item pada daftar. Riwayat dimuat dan receipt read/delivered dikirim sesuai cursor pesan terakhir.
-14. **Mengirim pesan** — ketik pesan teks di bagian bawah area chat lalu tekan **Enter** atau tombol kirim. Pesan dikirim melalui WebSocket dengan ID idempotensi agar retry tidak membuat duplikasi.
-14. **Melihat detail** — pada layar lebar, panel kanan menampilkan status kontak, tombol telepon/video, media bersama, file contoh, dan catatan privasi.
-15. **Menggunakan layar kecil** — panel daftar percakapan disembunyikan saat chat aktif. Tombol kembali di header membuka daftar, dengan tab untuk berpindah antara pesan, kontak, dan arsip.
-16. **Membuat percakapan** — tombol plus membuka form untuk membuat direct chat menggunakan ID pengguna atau grup menggunakan daftar ID anggota.
-17. **Mengarsipkan percakapan** — menu opsi pada header memindahkan chat ke Arsip lokal. Endpoint arsip backend belum tersedia.
-18. **Mengirim emoji** — emoji dapat dimasukkan ke pesan teks. Lampiran belum bisa dikirim karena backend belum menyediakan upload media.
-19. **Mengatur preferensi chat** — mode gelap, preferensi notifikasi, dan indikator pesan tersimpan di browser. Pengaturan indikator pesan memengaruhi centang pada pesan keluar.
-20. **Melihat media bersama** — galeri menampilkan contoh media. Aksi panggilan dan file contoh memberi pemberitahuan bahwa layanan backend belum tersedia.
+7. **Mengelola profil** — buka profil pribadi dari navigasi untuk melihat data akun dari `GET /profile`. Pilih **Edit profil** untuk memperbarui nama depan, nama belakang, nomor telepon, dan tentang melalui `POST /profile`; tombol simpan nonaktif jika tidak ada perubahan.
+8. **Mengubah avatar** — pilih **Ubah foto profil** dan unggah gambar JPEG, PNG, atau WebP. Frontend meminta signed upload URL, mengirim byte file langsung ke penyimpanan dengan `PUT`, lalu memuat ulang `GET /profile` untuk mendapatkan signed `avatar_url`. URL privat hanya disimpan sementara di memori dan diperbarui dengan memuat ulang profil sebelum kedaluwarsa.
+9. **Keluar** — buka profil pribadi dari navigasi, lalu pilih **Log out**. Backend mencabut access token dan frontend menghapus token lokal.
+10. **Melihat percakapan** — daftar percakapan dimuat dari backend bersama cuplikan pesan terakhir, waktu, dan jumlah pesan belum dibaca.
+11. **Mencari percakapan** — ketik nama kontak atau cuplikan pesan pada kolom pencarian. Daftar akan disaring langsung.
+12. **Melihat kontak** — pilih ikon Kontak di navigasi desktop atau tab **Kontak** pada daftar mobile. Kontak accepted dimuat dari backend; badge pada navigasi menunjukkan jumlah permintaan yang menunggu persetujuan penerima.
+13. **Membuka chat dari kontak** — pilih kontak untuk membuat atau membuka direct conversation.
+14. **Memfilter pesan** — pilih **Semua** atau **Belum dibaca**. Angka pada filter belum dibaca mengikuti jumlah percakapan yang masih memiliki pesan belum dibaca.
+15. **Membuka percakapan** — pilih item pada daftar. Riwayat dimuat dan receipt read/delivered dikirim sesuai cursor pesan terakhir.
+16. **Mengirim pesan** — ketik pesan teks di bagian bawah area chat lalu tekan **Enter** atau tombol kirim. Pesan dikirim melalui WebSocket dengan ID idempotensi agar retry tidak membuat duplikasi.
+17. **Melihat detail** — pada layar lebar, panel kanan menampilkan status kontak, tombol telepon/video, media bersama, file contoh, dan catatan privasi.
+18. **Menggunakan layar kecil** — panel daftar percakapan disembunyikan saat chat aktif. Tombol kembali di header membuka daftar, dengan tab untuk berpindah antara pesan, kontak, dan arsip.
+19. **Membuat percakapan** — tombol plus membuka form untuk membuat direct chat menggunakan ID pengguna atau grup menggunakan daftar ID anggota.
+20. **Mengarsipkan percakapan** — menu opsi pada header memindahkan chat ke Arsip lokal. Endpoint arsip backend belum tersedia.
+21. **Mengirim emoji** — emoji dapat dimasukkan ke pesan teks. Lampiran pesan belum bisa dikirim karena backend belum menyediakan upload media chat.
+22. **Mengatur preferensi chat** — mode gelap, preferensi notifikasi, dan indikator pesan tersimpan di browser. Pengaturan indikator pesan memengaruhi centang pada pesan keluar.
+23. **Melihat media bersama** — galeri menampilkan contoh media. Aksi panggilan dan file contoh memberi pemberitahuan bahwa layanan backend belum tersedia.
 
 ## Alur pengerjaan dan struktur kode
 
@@ -87,7 +89,7 @@ Daftar yang ditampilkan diturunkan dari data yang dimuat melalui `useMemo`. Stat
 - `src/features/chat/components/ChatWindow.jsx` menampilkan header, pesan, indikator mengetik, serta composer untuk pesan teks, lampiran lokal, dan emoji.
 - `src/features/chat/components/ChatHeader.jsx` menampilkan identitas kontak, panel detail, aksi arsip, serta pemberitahuan untuk panggilan yang belum terhubung.
 - `src/features/contact/components/ContactDetails.jsx` menampilkan profil, media, dan file bersama. Panel ini dibuka dari profil di header chat dan tetap berada di sisi kanan; pada layar sempit panel tampil sebagai drawer dari sisi kanan.
-- `src/features/profile/components/PersonalProfile.jsx` menampilkan profil pribadi ketika avatar `AR` di navigasi atau header mobile dipilih. Feature ini memiliki barrel `src/features/profile/index.js`; informasi profil masih berupa data contoh.
+- `src/features/profile/components/PersonalProfile.jsx` menampilkan dan mengedit profil pribadi ketika avatar di navigasi atau header mobile dipilih. `src/features/profile/services/profileService.js` menangani endpoint profil dan upload avatar langsung ke penyimpanan privat.
 - `src/features/settings/components/SettingsPanel.jsx` menampilkan preferensi tampilan di feature tersendiri. `src/features/settings/hooks/useTheme.js` dan `useChatPreferences.js` mengelola preferensi UI.
 - `src/features/chat/services/chatService.js` memuat percakapan, kontak, permintaan/undangan, dan history REST; membuat conversation, mengelola permintaan kontak/grup, dan menandai read. Pengiriman teks dilakukan oleh `src/features/chat/services/webSocketService.js` menggunakan protokol WebSocket backend.
 - `src/features/settings/services/settingsService.js` mengekspor `getThemePreference()`, `saveThemePreference(theme)`, `getChatPreferences()`, dan `saveChatPreferences(preferences)` untuk menyimpan tema, preferensi notifikasi, dan indikator pesan ke `localStorage`. API publik feature settings tersedia lewat `src/features/settings/index.js`.

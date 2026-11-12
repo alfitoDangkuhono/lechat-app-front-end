@@ -29,6 +29,48 @@ function storeSession(response) {
   return response.data
 }
 
+function verifySession(token) {
+  return api.get('/sessions/check-session', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+function hasUnauthorizedCode(payload, depth = 0) {
+  if (!payload || depth > 5) return false
+
+  if (typeof payload === 'string') {
+    try {
+      return hasUnauthorizedCode(JSON.parse(payload), depth + 1)
+    } catch (error) {
+      if (error instanceof SyntaxError) return false
+      throw error
+    }
+  }
+
+  if (typeof payload !== 'object') return false
+  if ([401, 419].includes(Number(payload.code))) return true
+
+  return ['data', 'response', 'error'].some((key) => (
+    hasUnauthorizedCode(payload[key], depth + 1)
+  ))
+}
+
+function isSessionUnauthorized(response) {
+  return [401, 419].includes(Number(response.status))
+    || hasUnauthorizedCode(response.data)
+}
+
+function isUnauthorizedHttpError(error) {
+  return axios.isAxiosError(error) && [401, 419].includes(error.response?.status)
+}
+
+function isUnauthorizedError(error) {
+  const cause = axios.isAxiosError(error) ? error : error?.cause
+  return axios.isAxiosError(cause) && [401, 419].includes(cause.response?.status)
+}
+
 export async function loginUser(credentials) {
   try {
     const response = await api.post('/sessions', credentials)
@@ -61,14 +103,50 @@ export async function checkLogin(token = getAuthToken()) {
   }
 
   try {
-    await api.get('/sessions/check-session', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
+    const response = await verifySession(token)
+    if (!isSessionUnauthorized(response)) return true
+    if (response.config?._retry) {
+      clearAuthTokens()
+      return false
+    }
+  } catch (error) {
+    if (!isUnauthorizedHttpError(error)) {
+      throw toAuthError(error, 'Sesi tidak dapat diverifikasi. Silakan coba lagi.')
+    }
+  }
+
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
+    clearAuthTokens()
+    return false
+  }
+
+  try {
+    await refreshAuthToken(refreshToken)
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      clearAuthTokens()
+      return false
+    }
+
+    throw error
+  }
+
+  const refreshedAccessToken = getAuthToken()
+  if (!refreshedAccessToken) {
+    clearAuthTokens()
+    return false
+  }
+
+  try {
+    const response = await verifySession(refreshedAccessToken)
+    if (isSessionUnauthorized(response)) {
+      clearAuthTokens()
+      return false
+    }
     return true
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
+    if (isUnauthorizedHttpError(error)) {
       clearAuthTokens()
       return false
     }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ChatSidebar from './ChatSidebar'
 import ChatAvatar from './ChatAvatar'
 import ChatIcon from './ChatIcon'
@@ -119,6 +119,7 @@ function Dashboard({ onLogout }) {
   const [isMediaOpen, setIsMediaOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef(null)
+  const avatarRefreshPendingRef = useRef(false)
   const socketRef = useRef(null)
   const notificationAudioRef = useRef(null)
   const pendingMessagesRef = useRef(new Map())
@@ -145,6 +146,15 @@ function Dashboard({ onLogout }) {
   const visibleChats = chats.filter((chat) => !chat.archived)
   const archivedChats = chats.filter((chat) => chat.archived)
   const currentProfileInitials = profileInitials(userProfile)
+  const profileAvatarUrl = userProfile?.avatar_url ?? ''
+
+  const requestAvatarRefresh = useCallback(() => {
+    if (avatarRefreshPendingRef.current) return
+    avatarRefreshPendingRef.current = true
+    setProfileLoadError('')
+    setIsProfileLoading(true)
+    setProfileLoadAttempt((attempt) => attempt + 1)
+  }, [])
 
   useEffect(() => {
     showConversationsRef.current = showConversations
@@ -373,13 +383,36 @@ function Dashboard({ onLogout }) {
         }
       })
       .finally(() => {
-        if (isCurrent) setIsProfileLoading(false)
+        if (isCurrent) {
+          setIsProfileLoading(false)
+          avatarRefreshPendingRef.current = false
+        }
       })
 
     return () => {
       isCurrent = false
     }
   }, [profileLoadAttempt])
+
+  useEffect(() => {
+    if (!profileAvatarUrl) return undefined
+
+    const expiresIn = Number.isFinite(userProfile?.avatar_url_expires_in)
+      ? userProfile.avatar_url_expires_in
+      : 900
+    const refreshDelay = profileLoadError
+      ? 30_000
+      : Math.max(1000, (expiresIn - 30) * 1000)
+    const refreshTimer = window.setTimeout(requestAvatarRefresh, refreshDelay)
+
+    return () => window.clearTimeout(refreshTimer)
+  }, [
+    profileAvatarUrl,
+    userProfile?.avatar_url_expires_in,
+    profileLoadError,
+    profileLoadAttempt,
+    requestAvatarRefresh,
+  ])
 
   useEffect(() => {
     if (isLoading) return undefined
@@ -910,6 +943,8 @@ function Dashboard({ onLogout }) {
         activeView={activeView}
         isProfileExpanded={activeSidePanel === 'profile'}
         profileInitials={currentProfileInitials}
+        profileAvatarUrl={profileAvatarUrl}
+        onAvatarImageError={requestAvatarRefresh}
         onFilterChange={setFilter}
         onViewChange={(view) => {
           setActiveView(view)
@@ -952,6 +987,8 @@ function Dashboard({ onLogout }) {
         socketStatus={socketStatus}
         isPersonalProfileExpanded={activeSidePanel === 'profile'}
         profileInitials={currentProfileInitials}
+        profileAvatarUrl={profileAvatarUrl}
+        onAvatarImageError={requestAvatarRefresh}
         hasOlderMessages={Boolean(pagination[activeId])}
         isLoadingOlder={isLoadingOlder}
         isLoadingMessages={isLoadingChatHistory}
@@ -1008,9 +1045,15 @@ function Dashboard({ onLogout }) {
           ) : activeSidePanel === 'profile' ? (
             <PersonalProfile
               profile={userProfile}
+              profileAvatarUrl={profileAvatarUrl}
+              onAvatarImageError={requestAvatarRefresh}
               isLoading={isProfileLoading}
               loadError={profileLoadError}
               onRetry={retryLoadProfile}
+              onProfileUpdated={(profile) => {
+                setUserProfile(profile)
+                saveCachedCurrentUserProfile(profile)
+              }}
               onSettingsClick={() => setActiveSidePanel('settings')}
               onClose={() => setActiveSidePanel(null)}
               onLogout={onLogout}

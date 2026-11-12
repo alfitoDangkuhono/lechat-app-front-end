@@ -443,40 +443,6 @@
   text-align: center;
 }
 
-.inbox-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: auto;
-  padding: 13px 11px;
-  background: #f7f8f5;
-  border: 1px solid #f0f1ed;
-  border-radius: 11px;
-}
-
-.note-icon {
-  display: grid;
-  width: 27px;
-  height: 27px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: #738a75;
-  background: #e9eee7;
-  border-radius: 8px;
-}
-
-.inbox-note strong {
-  color: #51564e;
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.inbox-note p {
-  margin-top: 3px;
-  color: #999b94;
-  font-size: 9px;
-}
-
 .chat-panel {
   display: flex;
   min-width: 0;
@@ -1819,6 +1785,114 @@
   box-shadow: 0 0 0 1px #e7ebe4;
 }
 
+.profile-avatar-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-avatar-content {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  background: #fff;
+  border-radius: inherit;
+}
+
+.profile-avatar-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.profile-avatar-open-button {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.profile-avatar-open-button:disabled { cursor: default; }
+
+.profile-photo-dialog {
+  width: fit-content;
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+}
+
+.profile-photo-dialog::backdrop { background: rgba(12, 16, 12, 0.78); }
+
+.profile-photo-dialog-content {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.profile-photo-dialog img {
+  display: block;
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.3);
+}
+
+.profile-photo-close {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  right: 10px;
+  padding: 7px 10px;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  background: rgba(20, 24, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+}
+
+.profile-avatar-file-input { display: none; }
+
+.profile-avatar-upload-button,
+.profile-edit-button,
+.profile-save-button,
+.profile-cancel-button {
+  padding: 8px 11px;
+  color: #536f57;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+  background: #edf2ed;
+  border: 1px solid #dfe8de;
+  border-radius: 8px;
+}
+
+.profile-avatar-upload-button:disabled,
+.profile-edit-button:disabled,
+.profile-save-button:disabled,
+.profile-cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.profile-form-error,
+.profile-form-message {
+  color: #a14f48;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.profile-form-message { color: #527a58; }
+
 .profile-account-badge {
   margin-top: 15px;
   padding: 4px 8px;
@@ -1915,6 +1989,63 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.profile-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 19px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.profile-edit-form label {
+  margin-top: 3px;
+  color: #767d74;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.profile-edit-form input,
+.profile-edit-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  color: #424a42;
+  font: inherit;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid #dfe4dc;
+  border-radius: 8px;
+}
+
+.profile-edit-form textarea {
+  resize: vertical;
+}
+
+.profile-edit-form input:focus,
+.profile-edit-form textarea:focus {
+  border-color: #8ca58e;
+  outline: 2px solid rgba(112, 145, 115, 0.15);
+}
+
+.profile-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.profile-edit-actions button { flex: 1; }
+
+.profile-cancel-button {
+  color: #6d746d;
+  background: #f5f6f4;
+  border-color: #e2e5e0;
+}
+
+.profile-edit-button {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .profile-preference-row {
@@ -2202,7 +2333,6 @@
 
 .app-shell[data-theme="dark"] .list-heading > span,
 .app-shell[data-theme="dark"] .detail-section-title strong,
-.app-shell[data-theme="dark"] .inbox-note strong,
 .app-shell[data-theme="dark"] .message-bubble,
 .app-shell[data-theme="dark"] .profile-info-row strong,
 .app-shell[data-theme="dark"] .profile-preference-row strong,
@@ -2212,7 +2342,6 @@
 }
 
 .app-shell[data-theme="dark"] .search-box,
-.app-shell[data-theme="dark"] .inbox-note,
 .app-shell[data-theme="dark"] .details-panel {
   background: #242c25;
   border-color: #343c35;
@@ -2259,7 +2388,6 @@
 .app-shell[data-theme="dark"] .unread-count { color: #fff; background: #66866c; }
 .app-shell[data-theme="dark"] .text-button { color: #a6c2a8; }
 .app-shell[data-theme="dark"] .text-button:hover { color: #c5ddc6; }
-.app-shell[data-theme="dark"] .note-icon,
 .app-shell[data-theme="dark"] .profile-info-icon,
 .app-shell[data-theme="dark"] .settings-intro-icon,
 .app-shell[data-theme="dark"] .settings-option-icon {
@@ -2400,6 +2528,28 @@
 .app-shell[data-theme="dark"] .file-icon { background: #44332f; }
 .app-shell[data-theme="dark"] .side-panel-backdrop { background: rgba(4, 8, 5, 0.58); }
 .app-shell[data-theme="dark"] .personal-profile-avatar { border-color: #303930; box-shadow: 0 0 0 1px #414a40; }
+.app-shell[data-theme="dark"] .profile-avatar-content { background: #242c25; }
+.app-shell[data-theme="dark"] .profile-avatar-upload-button,
+.app-shell[data-theme="dark"] .profile-edit-button,
+.app-shell[data-theme="dark"] .profile-save-button {
+  color: #c1d5c2;
+  background: #303b31;
+  border-color: #465348;
+}
+.app-shell[data-theme="dark"] .profile-cancel-button {
+  color: #c6cdc4;
+  background: #303630;
+  border-color: #454d45;
+}
+.app-shell[data-theme="dark"] .profile-edit-form { border-color: #394239; }
+.app-shell[data-theme="dark"] .profile-edit-form label { color: #aeb8ac; }
+.app-shell[data-theme="dark"] .profile-edit-form input,
+.app-shell[data-theme="dark"] .profile-edit-form textarea {
+  color: #d2d9d0;
+  background: #1b211c;
+  border-color: #414a42;
+}
+.app-shell[data-theme="dark"] .profile-form-message { color: #a8c9aa; }
 .app-shell[data-theme="dark"] .profile-logout-button { color: #e3a49c; background: #3d2d2b; border-color: #59403d; }
 .app-shell[data-theme="dark"] .profile-logout-button:hover { background: #4b3431; border-color: #704943; }
 .app-shell[data-theme="dark"] .profile-logout-button { box-shadow: 0 -8px 14px #242c25; }

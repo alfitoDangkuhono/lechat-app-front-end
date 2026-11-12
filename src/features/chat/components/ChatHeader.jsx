@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ChatAvatar from './ChatAvatar'
+import { ProfileAvatar } from '../../profile'
 
 function ChatHeader({
   chat,
@@ -11,6 +12,8 @@ function ChatHeader({
   isProfileExpanded,
   isPersonalProfileExpanded,
   profileInitials,
+  profileAvatarUrl,
+  onAvatarImageError,
 }) {
   const [showActions, setShowActions] = useState(false)
 
@@ -65,7 +68,13 @@ function ChatHeader({
           aria-controls="personal-profile-panel"
           onClick={onPersonalProfileClick}
         >
-          <span className="avatar avatar-profile">{profileInitials}</span>
+          <span className="avatar avatar-profile">
+            <ProfileAvatar
+              src={profileAvatarUrl}
+              initials={profileInitials}
+              onExpired={onAvatarImageError}
+            />
+          </span>
         </button>
         <button
           className="icon-button"

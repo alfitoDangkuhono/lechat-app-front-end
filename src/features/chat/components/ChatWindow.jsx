@@ -16,6 +16,8 @@ function ChatWindow({
   isProfileExpanded,
   isPersonalProfileExpanded,
   profileInitials,
+  profileAvatarUrl,
+  onAvatarImageError,
   socketStatus,
   onMessageChange,
   onSendMessage,
@@ -144,6 +146,8 @@ function ChatWindow({
         isProfileExpanded={isProfileExpanded}
         isPersonalProfileExpanded={isPersonalProfileExpanded}
         profileInitials={profileInitials}
+        profileAvatarUrl={profileAvatarUrl}
+        onAvatarImageError={onAvatarImageError}
       />
 
       <div className="chat-content" ref={chatContentRef} onScroll={handleChatScroll}>
