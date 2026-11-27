@@ -464,6 +464,132 @@
   background: #fff;
 }
 
+.chat-security-banner {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 9px 24px;
+  color: #315d43;
+  background: #eff8f0;
+  border-bottom: 1px solid #d5e8d8;
+  font-size: 11px;
+}
+
+.chat-security-banner.is-warning {
+  color: #754d14;
+  background: #fff7e6;
+  border-bottom-color: #f0dfb8;
+}
+
+.chat-security-banner code {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.chat-security-banner button {
+  padding: 4px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.message-security-legacy {
+  display: block;
+  margin-bottom: 5px;
+  color: #8a5b16;
+  font-size: 10px;
+}
+
+.message-decrypt-failed {
+  color: #a33b3b;
+  font-style: italic;
+}
+
+.message-deleted-placeholder {
+  color: #7d858c;
+  font-style: italic;
+}
+
+.message-decrypt-other-device {
+  color: #7d858c;
+  font-style: italic;
+}
+
+.identity-conflict-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  max-width: min(92vw, 680px);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 14px 18px;
+  color: #754d14;
+  background: #fff7e6;
+  border: 1px solid #f0dfb8;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.identity-conflict-copy {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.identity-conflict-banner button {
+  padding: 7px 12px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.identity-conflict-banner button.identity-conflict-primary {
+  color: #fff;
+  background: #b0762a;
+  border-color: #b0762a;
+}
+
+.app-shell[data-theme="dark"] .identity-conflict-banner {
+  color: #e8c88a;
+  background: #3a2f1b;
+  border-color: #5a4a26;
+}
+
+.message-failed-label {
+  color: #c0392b;
+  font-size: 10px;
+}
+
+.message-retry-button {
+  padding: 2px 7px;
+  color: #c0392b;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.message-retry-button:hover {
+  background: #fdeeec;
+}
+
 .header-profile-button {
   display: flex;
   min-width: 0;

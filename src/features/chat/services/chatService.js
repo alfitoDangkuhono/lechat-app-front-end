@@ -121,28 +121,44 @@ export function mapConversation(conversation, index = 0) {
     || member?.username
     || 'Percakapan'
   const lastMessage = lastMessageFor(conversation)
-  const preview = lastMessageText(lastMessage)
-    || conversation.last_message_text
-    || conversation.last_message_body
-    || 'Belum ada pesan'
   const colors = COLORS
   const colorIndex = [...String(id)].reduce((total, character) => total + character.charCodeAt(0), 0)
     % colors.length
   const isGroup = conversation.type === 'group'
+  const flatEncrypted = conversation.last_message_encrypted === true
+  const flatBody = conversation.last_message_body
+  const hasFlatLastMessage = Boolean(conversation.last_message_at)
+    || flatEncrypted
+    || (flatBody !== null && flatBody !== undefined)
+  const isEncryptedPreview = flatEncrypted
+    || Number(lastMessage?.encryption_version) === 1
+    || typeof lastMessage?.ciphertext === 'string'
+  const legacyPreview = lastMessageText(lastMessage)
+    || (typeof flatBody === 'string' && flatBody ? flatBody : '')
+  const hasLastMessage = Boolean(lastMessage) || hasFlatLastMessage
+  const preview = isEncryptedPreview
+    ? (legacyPreview || 'Pesan terenkripsi')
+    : isGroup
+      ? (legacyPreview || conversation.last_message_text || flatBody || 'Belum ada pesan')
+      : legacyPreview
+        || (hasLastMessage ? 'Pesan lama — tidak terenkripsi' : 'Belum ada pesan')
 
   return {
     ...conversation,
     id,
     name: title,
+    peerUsername: member?.username ?? member?.user?.username ?? '',
+    peerUserId: member ? memberUserId(member) ?? null : null,
     initials: title.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
     color: colors[colorIndex],
     status: isGroup ? 'group' : 'offline',
     preview,
     time: formatTime(
       lastMessage?.created_at
-      ?? lastMessage?.sent_at
-      ?? conversation.updated_at
-      ?? conversation.created_at,
+        ?? lastMessage?.sent_at
+        ?? conversation.last_message_at
+        ?? conversation.updated_at
+        ?? conversation.created_at,
     ),
     unread: Number(conversation.unread_message_count ?? conversation.unread ?? 0),
     archived: archivedIds().has(String(id)),
@@ -375,9 +391,14 @@ async function createConversation({ type = 'direct', memberIds = [], title, cont
     throw new Error('Pilih setidaknya satu anggota selain diri sendiri.')
   }
 
+  // Backend (Go) menuntut member user_id sebagai JSON number, bukan string.
+  const numericMemberIds = memberIds.map((id) => (
+    /^\d+$/.test(String(id ?? '')) ? Number(id) : id
+  ))
+
   const response = await api.post('/conversations', {
     type,
-    member_ids: memberIds,
+    member_ids: numericMemberIds,
     ...(type === 'group' && title?.trim() ? { title: title.trim() } : {}),
   })
   const data = responseData(response)
@@ -392,6 +413,8 @@ async function createConversation({ type = 'direct', memberIds = [], title, cont
     conversation: type === 'direct' && contact?.name
       ? {
         ...mappedConversation,
+        peerUsername: contact.username ?? mappedConversation.peerUsername,
+        peerUserId: mappedConversation.peerUserId ?? contact.id ?? null,
         name: contact.name,
         initials: contact.initials
           ?? contact.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
@@ -418,11 +441,35 @@ async function loadMessages(conversationId, { limit = 50, beforeId } = {}) {
   }
 }
 
+async function conversationHasEncryptedMessages(conversationId) {
+  try {
+    const response = await api.get(
+      `/conversations/${encodeURIComponent(conversationId)}/messages?limit=50`,
+    )
+    const data = responseData(response)
+    const items = Array.isArray(data?.items) ? data.items : []
+    return items.some((message) => Number(message.encryption_version) === 1)
+  } catch {
+    // Gagal cek → anggap tidak aktif (aman untuk alur migrasi; bila grup
+    // sebenarnya aktif, upload akan tetap tertolak/gagal dan error ditampilkan).
+    return false
+  }
+}
+
 async function markConversationRead(conversationId, throughMessageId) {
   if (!throughMessageId) return
   await api.post(
     `/conversations/${encodeURIComponent(conversationId)}/read`,
     { through_message_id: throughMessageId },
+  )
+}
+
+async function acknowledgeMessages(conversationId, ids) {
+  const messageIds = [...new Set(ids)].filter((id) => id !== undefined && id !== null)
+  if (!messageIds.length) return
+  await api.post(
+    `/conversations/${encodeURIComponent(conversationId)}/messages/ack`,
+    { ids: messageIds },
   )
 }
 
@@ -440,6 +487,22 @@ async function restoreConversation(conversationId) {
   return { id: conversationId, archived: false }
 }
 
+
+async function getGroupKey(conversationId, keyVersion) {
+  const query = keyVersion ? `?key_version=${encodeURIComponent(String(keyVersion))}` : '';
+  const response = await api.get(
+    `/conversations/${encodeURIComponent(conversationId)}/keys/me${query}`,
+  );
+  return responseData(response);
+}
+
+async function publishGroupKeys(conversationId, { key_version = 1, keys = [] } = {}) {
+  const response = await api.post(
+    `/conversations/${encodeURIComponent(conversationId)}/keys`,
+    { key_version, keys },
+  );
+  return responseData(response);
+}
 export const chatService = {
   getCurrentUserId: getUserIdFromToken,
   listConversations,
@@ -454,7 +517,11 @@ export const chatService = {
   createConversation,
   findDirectConversation,
   loadMessages,
+  conversationHasEncryptedMessages,
   markConversationRead,
+  acknowledgeMessages,
+  getGroupKey,
+  publishGroupKeys,
   mapMessage,
   archiveConversation,
   restoreConversation,

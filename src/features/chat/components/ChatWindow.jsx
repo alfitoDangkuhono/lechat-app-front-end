@@ -21,6 +21,9 @@ function ChatWindow({
   socketStatus,
   onMessageChange,
   onSendMessage,
+  securityWarning,
+  onTrustPeerKey,
+  onRetryMessage,
   hasOlderMessages,
   isLoadingOlder,
   isLoadingMessages,
@@ -150,6 +153,19 @@ function ChatWindow({
         onAvatarImageError={onAvatarImageError}
       />
 
+      {securityWarning && (
+        <div className="chat-security-banner is-warning" role="alert">
+          <strong>
+            {securityWarning.changed
+              ? `Kunci ${securityWarning.username} berubah.`
+              : `Identitas ${securityWarning.username} belum diverifikasi.`}
+          </strong>
+          <span>Bandingkan safety number berikut melalui kanal tepercaya sebelum mempercayai kunci ini:</span>
+          <code>{securityWarning.fingerprint}</code>
+          <button type="button" onClick={onTrustPeerKey}>Saya sudah memverifikasi safety number</button>
+        </div>
+      )}
+
       <div className="chat-content" ref={chatContentRef} onScroll={handleChatScroll}>
         {(isLoadingOlder || isLoadingMessages) && (
           <div className="chat-history-loading" role="status" aria-live="polite">
@@ -226,7 +242,7 @@ function ChatWindow({
                       />
                     )}
                     <div className="message-body">
-                      {(item.text || item.reply_to || item.attachments?.length > 0) && (
+                      {(item.text || item.decryptFailed || item.deleted_at || item.reply_to || item.attachments?.length > 0) && (
                         <div className={`message-bubble${bubbleColorClass}`}>
                           {chat.status === 'group'
                             && item.from === 'them'
@@ -234,13 +250,28 @@ function ChatWindow({
                               <span className="message-author">{senderAvatar.username}</span>
                           )}
                           <div className="message-bubble-content">
+                            {item.security === 'legacy' && (
+                              <small className="message-security-legacy">Pesan lama — tidak terenkripsi</small>
+                            )}
                             {item.reply_to && (
                               <div className="message-reply-quote">
                                 <strong>{getReplySender(item.reply_to, chat)}</strong>
                                 <span>{getReplyText(item.reply_to)}</span>
                               </div>
                             )}
-                            {item.text && <div className="message-text-line">{item.text}</div>}
+                            {item.deleted_at ? (
+                              <div className="message-text-line message-deleted-placeholder">Pesan telah dihapus</div>
+                            ) : item.decryptFailed ? (
+                              <div className={`message-text-line ${item.decryptErrorCode === 'key_mismatch'
+                                ? 'message-decrypt-other-device'
+                                : 'message-decrypt-failed'}`}
+                              >
+                                {item.decryptError
+                                  || 'Pesan terenkripsi tidak dapat dibuka di perangkat ini.'}
+                              </div>
+                            ) : (item.text && (
+                              <div className="message-text-line">{item.text}</div>
+                            ))}
                             {item.attachments?.map((file) => (
                               <div className="message-attachment" key={`${item.id}-${file.name}-${file.size}`}>
                                 <ChatIcon name="paperclip" size={15} />
@@ -253,7 +284,19 @@ function ChatWindow({
                       )}
                       <div className="message-meta">
                         <time>{item.time}</time>
-                        {item.from === 'me' && readReceiptsEnabled && (
+                        {item.from === 'me' && item.failed && (
+                          <>
+                            <span className="message-failed-label">Gagal dikirim</span>
+                            <button
+                              className="message-retry-button"
+                              type="button"
+                              onClick={() => onRetryMessage?.(item.client_message_id ?? item.id)}
+                            >
+                              Kirim ulang
+                            </button>
+                          </>
+                        )}
+                        {item.from === 'me' && !item.failed && readReceiptsEnabled && (
                           item.receiptStatus === 'read'
                             ? <ChatIcon name="check-double" size={16} className="read-check read-check-read" />
                             : item.receiptStatus === 'delivered'

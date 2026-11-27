@@ -14,7 +14,43 @@ import {
 import { SettingsPanel, useChatPreferences, useTheme } from '../../settings'
 import { chatService } from '../services/chatService'
 import { connectWebSocket } from '../services/webSocketService'
+import {
+  checkIdentityStatus,
+  clearGroupKeyCache,
+  createAndPublishGroupKey,
+  debugDirectMessage,
+  decryptDirectMessage,
+  decryptGroupMessage,
+  deleteEncryptedMessages,
+  encryptDirectMessage,
+  encryptGroupMessage,
+  getOrFetchGroupKey,
+  publishIdentity,
+  rewrapGroupKeyForMember,
+  saveEncryptedMessage,
+  trustPeerKey,
+} from '../services/e2eeService'
 import '../../../App.css'
+
+const SEND_RATE_LIMIT_MAX = 30
+const SEND_RATE_LIMIT_WINDOW_MS = 10_000
+const MAX_PLAINTEXT_BYTES = 49_136
+const WS_ERROR_MESSAGES = {
+  rate_limited: 'Pesan terlalu cepat dikirim. Tunggu sebentar lalu coba lagi.',
+  payload_too_large: 'Pesan terlalu panjang. Pisah menjadi beberapa pesan lebih pendek.',
+  conflict: 'Konflik pesan terdeteksi (ID pesan sudah dipakai dengan isi berbeda).',
+  encryption_required: 'Pesan direct wajib terenkripsi.',
+  group_encryption_unsupported: 'Pesan grup belum mendukung enkripsi.',
+  invalid_public_key: 'Public key tidak valid.',
+  invalid_reply: 'Pesan yang dibalas tidak valid.',
+  forbidden: 'Akses ke percakapan ditolak.',
+  not_found: 'Percakapan atau pesan tidak ditemukan.',
+  bad_request: 'Permintaan tidak valid.',
+}
+
+function friendlyWebSocketError(code) {
+  return WS_ERROR_MESSAGES[code] ?? `Koneksi chat menolak permintaan (${code ?? 'unknown_error'}).`
+}
 
 function mergeMessages(current, incoming) {
   const index = current.findIndex((item) => (
@@ -57,6 +93,174 @@ function updateOutgoingReceipt(messages, throughMessageId, receiptStatus) {
     if (statusRank[currentStatus] >= statusRank[receiptStatus]) return item
     return { ...item, receiptStatus }
   })
+}
+
+function resolveCanonicalUsernames(messages) {
+  let from = null
+  let to = null
+  for (const item of messages ?? []) {
+    if (typeof item.from_username !== 'string' || !item.from_username) continue
+    if (typeof item.to_username !== 'string' || !item.to_username) continue
+    if (item.from === 'me') {
+      from ??= item.from_username
+      to ??= item.to_username
+    } else {
+      to ??= item.from_username
+      from ??= item.to_username
+    }
+    if (from && to) break
+  }
+  return { from, to }
+}
+
+async function decodeMessages(chat, rawMessages, currentUsername) {
+  const messages = []
+  const acknowledgedIds = []
+  let peerWarning = null
+
+  for (const rawMessage of rawMessages) {
+    if (chat.status === 'group') {
+      if (Number(rawMessage.encryption_version) !== 1) {
+        messages.push(chatService.mapMessage({ ...rawMessage, security: 'legacy' }))
+        continue
+      }
+
+      if (rawMessage.deleted_at || rawMessage.is_deleted) {
+        messages.push({
+          ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        })
+        continue
+      }
+
+      if (typeof rawMessage.ciphertext !== 'string' || !rawMessage.ciphertext
+        || typeof rawMessage.iv !== 'string' || !rawMessage.iv) {
+        messages.push({
+          ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+          decryptFailed: true,
+          decryptError: 'Isi pesan terenkripsi grup tidak lengkap.',
+        })
+        continue
+      }
+
+      try {
+        const text = await decryptGroupMessage({
+          message: rawMessage,
+          conversationId: chat.id,
+          currentUsername,
+        })
+        const mappedMessage = chatService.mapMessage({
+          ...rawMessage,
+          body: text,
+          text,
+          security: 'e2ee',
+        })
+        messages.push({
+          ...mappedMessage,
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        })
+        if (rawMessage.from_username !== currentUsername && rawMessage.id !== undefined) {
+          acknowledgedIds.push(rawMessage.id)
+        }
+      } catch (error) {
+        messages.push({
+          ...chatService.mapMessage({
+            ...rawMessage,
+            body: '',
+            text: '',
+            security: 'e2ee',
+          }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+          decryptFailed: true,
+          decryptError: error.message || 'Pesan grup terenkripsi tidak dapat dibuka di perangkat ini.',
+        })
+      }
+      continue
+    }
+
+    if (Number(rawMessage.encryption_version) !== 1) {
+      messages.push(chatService.mapMessage({ ...rawMessage, security: 'legacy' }))
+      continue
+    }
+
+    if (rawMessage.deleted_at || rawMessage.is_deleted) {
+      if (rawMessage.id !== undefined) {
+        deleteEncryptedMessages(currentUsername, chat.id, [rawMessage.id]).catch(() => {})
+      }
+      messages.push({
+        ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+        from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+      })
+      continue
+    }
+
+    if (typeof rawMessage.ciphertext !== 'string' || !rawMessage.ciphertext
+      || typeof rawMessage.iv !== 'string' || !rawMessage.iv) {
+      messages.push({
+        ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+        from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        decryptFailed: true,
+        decryptError: 'Isi pesan terenkripsi tidak lengkap.',
+      })
+      continue
+    }
+
+    try {
+      await saveEncryptedMessage(currentUsername, chat.id, rawMessage)
+      const text = await decryptDirectMessage({
+        message: rawMessage,
+        currentUsername,
+        peerUserId: chat.peerUserId,
+        peerUsername: chat.peerUsername,
+      })
+      const mappedMessage = chatService.mapMessage({
+        ...rawMessage,
+        body: text,
+        text,
+        security: 'e2ee',
+      })
+      messages.push({
+        ...mappedMessage,
+        from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+      })
+      if (rawMessage.from_username !== currentUsername && rawMessage.id !== undefined) {
+        acknowledgedIds.push(rawMessage.id)
+      }
+    } catch (error) {
+      if (error?.peer && !peerWarning) peerWarning = error.peer
+      if (!error?.peer) {
+        console.warn('Dekripsi pesan E2EE gagal:', {
+          from_username: rawMessage.from_username,
+          to_username: rawMessage.to_username,
+          currentUsername,
+          peerUsername: chat.peerUsername,
+          sender_id: rawMessage.sender_id,
+          peerUserId: chat.peerUserId,
+          error: error?.name ?? String(error),
+          errorMessage: error?.message ?? null,
+        })
+      }
+      messages.push({
+        ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+        from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        decryptFailed: true,
+        decryptErrorCode: error?.code ?? null,
+        decryptError: error?.peer
+          ? error.message
+          : (error instanceof DOMException || !error?.message
+            ? 'Pesan terenkripsi tidak dapat dibuka di perangkat ini.'
+            : error.message),
+      })
+    }
+  }
+
+  if (acknowledgedIds.length) {
+    await chatService.acknowledgeMessages(chat.id, acknowledgedIds).catch((error) => {
+      console.warn('ACK pesan terenkripsi gagal:', error?.message ?? error)
+    })
+  }
+  return { messages, peerWarning }
 }
 
 async function playNotificationSound(audioContext) {
@@ -112,17 +316,25 @@ function Dashboard({ onLogout }) {
   const [activeView, setActiveView] = useState('chats')
   const [activeSidePanel, setActiveSidePanel] = useState(null)
   const [userProfile, setUserProfile] = useState(() => getCachedCurrentUserProfile())
+  const currentUsername = userProfile?.username ?? ''
   const [isProfileLoading, setIsProfileLoading] = useState(true)
   const [profileLoadError, setProfileLoadError] = useState('')
   const [profileLoadAttempt, setProfileLoadAttempt] = useState(0)
   const [isNewChatOpen, setIsNewChatOpen] = useState(false)
   const [isMediaOpen, setIsMediaOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [securityWarning, setSecurityWarning] = useState(null)
+  const [identityConflict, setIdentityConflict] = useState(null)
+  const [keyTrustRevision, setKeyTrustRevision] = useState(0)
+  const [groupKeyRefreshRev, setGroupKeyRefreshRev] = useState(0)
   const noticeTimer = useRef(null)
   const avatarRefreshPendingRef = useRef(false)
   const socketRef = useRef(null)
+  const chatsRef = useRef(chats)
+  const currentUsernameRef = useRef(currentUsername)
   const notificationAudioRef = useRef(null)
   const pendingMessagesRef = useRef(new Map())
+  const sendTimestampsRef = useRef([])
   const notifiedMessagesRef = useRef(new Set())
   const loadingOlderChatIdsRef = useRef(new Set())
   const showConversationsRef = useRef(showConversations)
@@ -159,6 +371,11 @@ function Dashboard({ onLogout }) {
   useEffect(() => {
     showConversationsRef.current = showConversations
   }, [showConversations])
+
+  useEffect(() => {
+    chatsRef.current = chats
+    currentUsernameRef.current = currentUsername
+  }, [chats, currentUsername])
 
   useEffect(() => {
     notificationsEnabledRef.current = notificationsEnabled
@@ -202,6 +419,71 @@ function Dashboard({ onLogout }) {
     window.clearTimeout(noticeTimer.current)
     setNotice(text)
     noticeTimer.current = window.setTimeout(() => setNotice(''), 3500)
+  }
+
+  function assertSendRateLimit() {
+    const now = Date.now()
+    sendTimestampsRef.current = sendTimestampsRef.current
+      .filter((timestamp) => now - timestamp < SEND_RATE_LIMIT_WINDOW_MS)
+    if (sendTimestampsRef.current.length >= SEND_RATE_LIMIT_MAX) {
+      const retryInSeconds = Math.max(1, Math.ceil(
+        (SEND_RATE_LIMIT_WINDOW_MS - (now - sendTimestampsRef.current[0])) / 1000,
+      ))
+      throw new Error(`Pesan terlalu cepat dikirim. Tunggu ${retryInSeconds} detik lalu coba lagi.`)
+    }
+  }
+
+  function recordSendTimestamp() {
+    sendTimestampsRef.current.push(Date.now())
+  }
+
+  function markPendingMessagesFailed() {
+    const failedEntries = [...pendingMessagesRef.current.entries()]
+      .filter(([, item]) => !item.failed)
+    if (!failedEntries.length) return
+    for (const [, item] of failedEntries) item.failed = true
+
+    const failedIdsByConversation = new Map()
+    for (const [clientMessageId, item] of failedEntries) {
+      const conversationId = String(item.frame.conversation_id)
+      const ids = failedIdsByConversation.get(conversationId) ?? new Set()
+      ids.add(String(clientMessageId))
+      failedIdsByConversation.set(conversationId, ids)
+    }
+
+    setChats((current) => current.map((chat) => {
+      const failedIds = failedIdsByConversation.get(String(chat.id))
+      if (!failedIds?.size) return chat
+      return {
+        ...chat,
+        messages: chat.messages.map((item) => (
+          item.pending === true && failedIds.has(String(item.client_message_id ?? item.id))
+            ? { ...item, pending: false, failed: true }
+            : item
+        )),
+      }
+    }))
+  }
+
+  function retryPendingMessage(clientMessageId) {
+    const entry = pendingMessagesRef.current.get(String(clientMessageId))
+    if (!entry) {
+      showNotice('Pesan tidak dapat dikirim ulang. Silakan tulis ulang pesan Anda.')
+      return
+    }
+    const sent = socketRef.current?.send(entry.frame)
+    if (sent === false) {
+      showNotice('Koneksi belum siap. Pesan akan dikirim otomatis setelah koneksi tersambung.')
+    }
+    entry.failed = false
+    setChats((current) => current.map((chat) => ({
+      ...chat,
+      messages: chat.messages.map((item) => (
+        String(item.client_message_id ?? item.id) === String(clientMessageId)
+          ? { ...item, pending: true, failed: false }
+          : item
+      )),
+    })))
   }
 
   function togglePersonalProfile() {
@@ -395,6 +677,26 @@ function Dashboard({ onLogout }) {
   }, [profileLoadAttempt])
 
   useEffect(() => {
+    if (!currentUsername) return undefined
+
+    let isCurrent = true
+    checkIdentityStatus(currentUsername)
+      .then((status) => {
+        if (!isCurrent) return
+        if (status?.conflict) {
+          setIdentityConflict({ username: status.username })
+        } else {
+          setIdentityConflict(null)
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      isCurrent = false
+    }
+  }, [currentUsername, keyTrustRevision])
+
+  useEffect(() => {
     if (!profileAvatarUrl) return undefined
 
     const expiresIn = Number.isFinite(userProfile?.avatar_url_expires_in)
@@ -421,7 +723,7 @@ function Dashboard({ onLogout }) {
     const connection = connectWebSocket({
       conversationId: activeId,
       onStatus: setSocketStatus,
-      onEvent(event) {
+      async onEvent(event) {
         if (!isCurrent) return
 
         const eventConversationId = event.conversation_id
@@ -435,20 +737,29 @@ function Dashboard({ onLogout }) {
 
         if (event.type === 'conversation.history') {
           if (!activeId) return
-          const items = (event.data?.items ?? []).map(chatService.mapMessage).reverse()
+          const currentChat = chatsRef.current.find((chat) => String(chat.id) === String(activeId))
+          if (!currentChat) return
+          const { messages: decodedItems, peerWarning } = await decodeMessages(
+            currentChat,
+            event.data?.items ?? [],
+            currentUsernameRef.current,
+          )
+          if (peerWarning) setSecurityWarning(peerWarning)
+          const items = decodedItems.reverse()
           setPagination((current) => ({
             ...current,
             [activeId]: event.data?.next_before_id ?? null,
           }))
           const lastIncomingMessage = [...items].reverse().find((item) => item.from === 'them')
           const pending = [...pendingMessagesRef.current.values()]
-            .filter((frame) => String(frame.conversation_id) === String(activeId))
+            .filter((item) => String(item.frame.conversation_id) === String(activeId))
           const confirmedIds = new Set(items.map((item) => item.client_message_id).filter(Boolean))
 
-          pending.forEach((frame) => {
+          pending.forEach((item) => {
+            const { frame } = item
             if (confirmedIds.has(frame.client_message_id)) {
               pendingMessagesRef.current.delete(frame.client_message_id)
-            } else if (event.data?.joined === true) {
+            } else if (event.data?.joined === true && !item.failed) {
               connection.send(frame)
             }
           })
@@ -469,17 +780,18 @@ function Dashboard({ onLogout }) {
           }
 
           const outstanding = pending
-            .filter((frame) => pendingMessagesRef.current.has(frame.client_message_id))
-            .map((frame) => ({
+            .filter(({ frame }) => pendingMessagesRef.current.has(frame.client_message_id))
+            .map(({ frame, text, failed }) => ({
               id: frame.client_message_id,
               client_message_id: frame.client_message_id,
               from: 'me',
-              text: frame.body,
+              text,
               time: new Intl.DateTimeFormat('id-ID', {
                 hour: '2-digit',
                 minute: '2-digit',
               }).format(new Date()),
-              pending: true,
+              pending: !failed,
+              failed: Boolean(failed),
             }))
 
           setChats((current) => current.map((chat) => (
@@ -523,7 +835,18 @@ function Dashboard({ onLogout }) {
         if (event.type === 'message.created' || event.type === 'message.updated') {
           const rawMessage = event.data?.message ?? event.data
           if (!rawMessage || eventConversationId === null) return
-          const incoming = chatService.mapMessage(rawMessage)
+          const targetChat = chatsRef.current.find((chat) => (
+            String(chat.id) === String(eventConversationId)
+          ))
+          if (!targetChat) return
+          const { messages: decodedMessages, peerWarning } = await decodeMessages(
+            targetChat,
+            [rawMessage],
+            currentUsernameRef.current,
+          )
+          if (peerWarning) setSecurityWarning(peerWarning)
+          const [incoming] = decodedMessages
+          if (!incoming) return
           if (incoming.client_message_id) {
             pendingMessagesRef.current.delete(incoming.client_message_id)
           }
@@ -569,7 +892,9 @@ function Dashboard({ onLogout }) {
             ))
             const updatedConversation = {
               ...conversation,
-              preview: incoming.text || conversation.preview,
+              preview: incoming.decryptFailed
+                ? 'Pesan terenkripsi'
+                : incoming.text || conversation.preview,
               time: incoming.time,
               unread: event.type === 'message.created'
                 && incoming.from === 'them'
@@ -598,8 +923,13 @@ function Dashboard({ onLogout }) {
 
         if (event.type === 'message.deleted') {
           const deleted = event.data?.message ?? event.data
+          const deletedConversationId = event.conversation_id ?? activeId
+          if (deleted?.id && deletedConversationId) {
+            deleteEncryptedMessages(currentUsernameRef.current, deletedConversationId, [deleted.id])
+              .catch(() => {})
+          }
           setChats((current) => current.map((chat) => (
-            String(chat.id) === String(event.conversation_id ?? activeId)
+            String(chat.id) === String(deletedConversationId)
               ? {
                 ...chat,
                 messages: chat.messages.filter((item) => String(item.id) !== String(deleted?.id)),
@@ -609,9 +939,49 @@ function Dashboard({ onLogout }) {
           return
         }
 
-        if (event.type === 'error') {
-          showNotice(event.error || 'Terjadi kesalahan pada koneksi chat.')
+        if (event.type === 'group_key.created') {
+          const keyConversationId = event.conversation_id
+            ?? event.data?.conversation_id
+            ?? activeId
+          const keyVersion = event.data?.key_version
+          if (!keyConversationId || !keyVersion || Number(keyVersion) < 1) return
+
+          // Kontrak §8: ambil wrapped key versi baru via REST lalu cache di perangkat.
+          getOrFetchGroupKey({
+            conversationId: keyConversationId,
+            keyVersion: Number(keyVersion),
+            currentUsername: currentUsernameRef.current,
+          })
+            .then((groupKey) => {
+              if (!groupKey) {
+                console.warn(
+                  `group_key.created: tidak ada kunci versi ${keyVersion} untuk account ini pada ${keyConversationId}.`,
+                )
+                return
+              }
+              // Kunci versi baru sudah ter-cache. Segarkan riwayat agar pesan yang
+              // tadinya gagal didekripsi ikut ter-render.
+              if (activeId !== null && String(activeId) === String(keyConversationId)) {
+                setGroupKeyRefreshRev((rev) => rev + 1)
+              }
+            })
+            .catch((error) => {
+              if (error?.response?.status === 403) {
+                clearGroupKeyCache(currentUsernameRef.current, keyConversationId).catch(() => {})
+              }
+              console.warn('Menarik kunci grup setelah group_key.created gagal:', error?.message ?? error)
+            })
+          return
         }
+
+        if (event.type === 'error') {
+          showNotice(friendlyWebSocketError(event.error))
+          markPendingMessagesFailed()
+        }
+      },
+      onEventError(error) {
+        if (error?.peer) setSecurityWarning(error.peer)
+        showNotice(error?.message || 'Pesan gagal diproses.')
       },
     })
     socketRef.current = connection
@@ -622,7 +992,7 @@ function Dashboard({ onLogout }) {
       if (socketRef.current === connection) socketRef.current = null
       setSocketStatus('disconnected')
     }
-  }, [activeId, isLoading])
+  }, [activeId, isLoading, keyTrustRevision])
 
   useEffect(() => {
     if (!activeId || isLoading) return undefined
@@ -634,17 +1004,36 @@ function Dashboard({ onLogout }) {
     chatService.loadMessages(activeId)
       .then(async (page) => {
         if (!isCurrent) return
+        const selectedChat = chatsRef.current.find((chat) => String(chat.id) === String(activeId))
+        if (!selectedChat) return
+        const { messages: decodedItems, peerWarning } = await decodeMessages(
+          selectedChat,
+          page.items,
+          currentUsername,
+        )
+        if (!isCurrent) return
+        if (peerWarning) setSecurityWarning(peerWarning)
+        const items = decodedItems
         setPagination((current) => ({ ...current, [activeId]: page.nextBeforeId }))
-        setChats((current) => current.map((chat) => (
-          String(chat.id) === String(activeId)
-            ? {
-              ...chat,
-              messages: mergeMessageLists(page.items, chat.messages),
-              unread: 0,
-            }
-            : chat
-        )))
-        const lastIncomingMessage = [...page.items].reverse()
+        setChats((current) => current.map((chat) => {
+          if (String(chat.id) !== String(activeId)) return chat
+          const merged = mergeMessageLists(items, chat.messages)
+          const lastMsg = merged[merged.length - 1]
+          const lastPreview = lastMsg
+            ? (lastMsg.deleted_at || lastMsg.is_deleted
+              ? 'Pesan telah dihapus'
+              : lastMsg.text || lastMsg.body || (lastMsg.decryptFailed ? 'Pesan terenkripsi' : chat.preview))
+            : chat.preview
+          const lastTime = lastMsg?.time || chat.time
+          return {
+            ...chat,
+            messages: merged,
+            preview: lastPreview,
+            time: lastTime,
+            unread: 0,
+          }
+        }))
+        const lastIncomingMessage = [...items].reverse()
           .find((item) => item.from === 'them')
         if (lastIncomingMessage) {
           await chatService.markConversationRead(activeId, lastIncomingMessage.id)
@@ -652,7 +1041,10 @@ function Dashboard({ onLogout }) {
         }
       })
       .catch((error) => {
-        if (isCurrent) showNotice(error.message || 'Riwayat pesan gagal dimuat.')
+        if (isCurrent) {
+          if (error?.peer) setSecurityWarning(error.peer)
+          showNotice(error.message || 'Riwayat pesan gagal dimuat.')
+        }
       })
       .finally(() => {
         if (isCurrent) {
@@ -665,7 +1057,37 @@ function Dashboard({ onLogout }) {
     return () => {
       isCurrent = false
     }
-  }, [activeId, isLoading])
+  }, [
+    activeId,
+    currentUsername,
+    isLoading,
+    keyTrustRevision,
+    groupKeyRefreshRev,
+  ])
+
+  useEffect(() => {
+    if (!activeId) return undefined
+
+    window.__lechatE2eeDebug = async () => {
+      const chat = chatsRef.current.find((item) => String(item.id) === String(activeId))
+      if (!chat || chat.status === 'group') {
+        return 'Buka percakapan direct terlebih dahulu.'
+      }
+      const lastEncrypted = [...chat.messages].reverse().find((item) => item.ciphertext && item.iv)
+      const result = await debugDirectMessage({
+        message: lastEncrypted ?? null,
+        currentUsername: currentUsernameRef.current,
+        peerUserId: chat.peerUserId,
+        peerUsername: chat.peerUsername,
+      })
+      console.log('Lechat E2EE debug:', result)
+      return result
+    }
+
+    return () => {
+      delete window.__lechatE2eeDebug
+    }
+  }, [activeId])
 
   const filteredChats = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -680,6 +1102,7 @@ function Dashboard({ onLogout }) {
   }, [activeView, archivedChats, filter, search, visibleChats])
 
   async function selectChat(chatId) {
+    setSecurityWarning(null)
     setActiveId(chatId)
     setActiveView('chats')
     setShowConversations(false)
@@ -695,19 +1118,30 @@ function Dashboard({ onLogout }) {
     setLoadingOlderChatIds((current) => new Set(current).add(chatKey))
     try {
       const page = await chatService.loadMessages(chatId, { beforeId })
+      let items = page.items
+      if (activeChat) {
+        const { messages: decodedItems, peerWarning } = await decodeMessages(
+          activeChat,
+          page.items,
+          currentUsername,
+        )
+        if (peerWarning) setSecurityWarning(peerWarning)
+        items = decodedItems
+      }
       setChats((current) => current.map((chat) => {
         if (String(chat.id) !== chatKey) return chat
         const existingIds = new Set(chat.messages.map((item) => String(item.id)))
         return {
           ...chat,
           messages: [
-            ...page.items.filter((item) => !existingIds.has(String(item.id))),
+            ...items.filter((item) => !existingIds.has(String(item.id))),
             ...chat.messages,
           ],
         }
       }))
       setPagination((current) => ({ ...current, [chatId]: page.nextBeforeId }))
     } catch (error) {
+      if (error?.peer) setSecurityWarning(error.peer)
       showNotice(error.message || 'Riwayat pesan lama gagal dimuat.')
     } finally {
       loadingOlderChatIdsRef.current.delete(chatKey)
@@ -725,6 +1159,19 @@ function Dashboard({ onLogout }) {
       setChats((current) => created
         ? [conversation, ...current]
         : current.map((chat) => chat.id === conversation.id ? conversation : chat))
+      if (details.type === 'group' && created && currentUsername) {
+        try {
+          await createAndPublishGroupKey({
+            conversationId: conversation.id,
+            keyVersion: 1,
+            currentUsername,
+            members: (details.memberIds || []).map((id) => ({ id })),
+          })
+        } catch (err) {
+          console.warn('Inisialisasi kunci grup baru dilewati:', err?.message ?? err)
+          showNotice(`Grup dibuat, tetapi kunci E2EE belum terpasang: ${err?.message ?? 'kesalahan tidak diketahui'}. Buat ulang grup setelah semua anggota membuka Lechat sekali; tanpa kunci, pesan grup tidak dapat dikirim.`)
+        }
+      }
       setActiveId(conversation.id)
       setActiveView('chats')
       setFilter('Semua')
@@ -791,7 +1238,22 @@ function Dashboard({ onLogout }) {
     if (!activeChat || activeChat.status !== 'group') return
     try {
       await chatService.inviteToGroup(activeChat.id, userId)
-      showNotice('Undangan grup berhasil dikirim.')
+      // Kontrak §5.2: bungkus ulang versi kunci aktif untuk anggota baru supaya
+      // anggota baru dapat mengambil kunci via GET /keys/me dan ikut bertukar pesan.
+      rewrapGroupKeyForMember({
+        conversationId: activeChat.id,
+        currentUsername,
+        newUserId: userId,
+      })
+        .then((result) => {
+          showNotice(result
+            ? 'Undangan grup terkirim dan kunci grup dibagikan ke anggota baru.'
+            : 'Undangan grup terkirim. (Kunci grup akan dibagikan saat anggota bertukar pesan.)')
+        })
+        .catch((error) => {
+          console.warn('Rewrap kunci grup untuk anggota baru gagal:', error?.message ?? error)
+          showNotice('Undangan grup terkirim, tetapi kunci grup belum dibagikan ke anggota baru.')
+        })
       return true
     } catch (error) {
       if (error.response?.status === 409) {
@@ -833,6 +1295,35 @@ function Dashboard({ onLogout }) {
     }
   }
 
+  async function ensureGroupKeyInitialized() {
+    if (!activeChat || activeChat.status !== 'group') return false
+
+    // Jangan timpa grup yang sudah aktif E2EE: cek riwayat terenkripsi
+    // di server dan di state lokal. Jika ada, biarkan error asli tampil.
+    const hasEncryptedServer = await chatService.conversationHasEncryptedMessages(activeChat.id)
+    const hasEncryptedLocal = activeChat.messages.some((item) => Number(item.encryption_version) === 1)
+    if (hasEncryptedServer || hasEncryptedLocal) return false
+
+    const members = groupMemberState?.conversationId === activeChat.id
+      && groupMemberState?.members?.length
+      ? groupMemberState.members
+      : await chatService.listGroupMembers(activeChat.id).catch(() => [])
+    try {
+      await createAndPublishGroupKey({
+        conversationId: activeChat.id,
+        keyVersion: 1,
+        currentUsername,
+        members,
+      })
+      showNotice('Enkripsi end-to-end grup berhasil diaktifkan. Pesan berikutnya akan terenkripsi.')
+      return true
+    } catch (error) {
+      console.warn('Mengaktifkan E2EE grup gagal:', error?.message ?? error)
+      showNotice(`Enkripsi grup belum berhasil diaktifkan: ${error?.message ?? 'kesalahan tidak diketahui'}. Coba lagi setelah semua anggota membuka Lechat sekali.`)
+      return false
+    }
+  }
+
   async function sendMessage(event, attachments = [], replyingTo = null) {
     event.preventDefault()
     const text = message.trim()
@@ -845,19 +1336,66 @@ function Dashboard({ onLogout }) {
     if (attachments.length > 0) {
       throw new Error('Backend saat ini hanya mendukung pesan teks; lampiran belum tersedia.')
     }
+    if (new TextEncoder().encode(text).length > MAX_PLAINTEXT_BYTES) {
+      throw new Error('Pesan terlalu panjang (maksimum sekitar 48 KB). Pisah menjadi beberapa pesan lebih pendek.')
+    }
     const frame = {
       type: 'message.send',
       conversation_id: activeId,
       client_message_id: crypto.randomUUID(),
       message_type: 'text',
-      body: text,
       ...(replyingTo?.id ? { reply_to_message_id: replyingTo.id } : {}),
     }
+    if (activeChat.status === 'group') {
+      let encrypted
+      try {
+        encrypted = await encryptGroupMessage({
+          text,
+          conversationId: activeId,
+          fromUsername: currentUsername,
+        })
+      } catch (error) {
+        // Kontrak §4.1: jika kunci belum ada karena grup fresh/legacy (belum
+        // ada pesan terenkripsi), aktifkan E2EE lalu kirim ulang. Grup yang
+        // sudah aktif E2EE dibiarkan error (tidak menimpa kunci).
+        if (error?.code === 'group_key_unavailable' && await ensureGroupKeyInitialized()) {
+          encrypted = await encryptGroupMessage({
+            text,
+            conversationId: activeId,
+            fromUsername: currentUsername,
+          })
+        } else {
+          throw error
+        }
+      }
+      Object.assign(frame, encrypted)
+    } else {
+      if (!currentUsername || !activeChat.peerUsername) {
+        throw new Error('Username Anda atau kontak belum tersedia untuk menyiapkan E2EE.')
+      }
+      if (!activeChat.peerUserId) {
+        throw new Error('ID pengguna kontak belum tersedia. Muat ulang daftar percakapan lalu coba lagi.')
+      }
+      const canonical = resolveCanonicalUsernames(activeChat.messages)
+      try {
+        Object.assign(frame, await encryptDirectMessage({
+          text,
+          from: canonical.from ?? currentUsername,
+          to: canonical.to ?? activeChat.peerUsername,
+          toUserId: activeChat.peerUserId,
+        }))
+      } catch (error) {
+        if (error?.peer) setSecurityWarning(error.peer)
+        throw error
+      }
+    }
+    assertSendRateLimit()
+    recordSendTimestamp()
     const time = new Intl.DateTimeFormat('id-ID', {
       hour: '2-digit',
       minute: '2-digit',
     }).format(new Date())
-    pendingMessagesRef.current.set(frame.client_message_id, frame)
+    pendingMessagesRef.current.set(frame.client_message_id, { frame, text, failed: false })
     socketRef.current?.send(frame)
     setChats((current) => current.map((chat) => (
       String(chat.id) === String(activeId)
@@ -871,6 +1409,7 @@ function Dashboard({ onLogout }) {
             text,
             time,
             receiptStatus: 'sent',
+            security: frame.encryption_version === 1 ? 'e2ee' : 'legacy',
             ...(replyingTo ? {
               reply_to: {
                 id: replyingTo.id,
@@ -888,6 +1427,36 @@ function Dashboard({ onLogout }) {
     setMessage('')
   }
 
+  async function confirmDeviceIdentity() {
+    if (!currentUsername) return
+    try {
+      await publishIdentity(currentUsername)
+      setIdentityConflict(null)
+      setKeyTrustRevision((revision) => revision + 1)
+      showNotice('Kunci perangkat ini kini dipakai untuk akun Anda.')
+    } catch (error) {
+      showNotice(error.message || 'Kunci perangkat gagal dipublikasikan.')
+    }
+  }
+
+  async function trustChangedPeerKey() {
+    if (!securityWarning?.username || !securityWarning.userId || !securityWarning.publicKey) return
+    try {
+      await trustPeerKey({
+        userId: securityWarning.userId,
+        username: securityWarning.username,
+        account: currentUsername,
+        publicKey: securityWarning.publicKey,
+        updatedAt: securityWarning.updatedAt,
+      })
+      setSecurityWarning(null)
+      setKeyTrustRevision((revision) => revision + 1)
+      showNotice(`Kunci ${securityWarning.username} telah diverifikasi di perangkat ini.`)
+    } catch (error) {
+      showNotice(error.message || 'Kunci lawan bicara gagal disimpan.')
+    }
+  }
+
   async function selectContact(contact) {
     try {
       const existingConversation = chatService.findDirectConversation(chats, contact.id)
@@ -897,6 +1466,8 @@ function Dashboard({ onLogout }) {
             ? {
               ...chat,
               name: contact.name,
+              peerUsername: contact.username || chat.username,
+              peerUserId: chat.peerUserId ?? contact.id,
               initials: contact.initials,
               color: contact.color,
             }
@@ -998,7 +1569,28 @@ function Dashboard({ onLogout }) {
         onSendMessage={(event, attachments, replyingTo) => (
           sendMessage(event, attachments, replyingTo)
         )}
+        securityWarning={securityWarning
+          && securityWarning.username === activeChat?.peerUsername
+          ? securityWarning
+          : null}
+        onTrustPeerKey={trustChangedPeerKey}
+        onRetryMessage={retryPendingMessage}
       />
+      {identityConflict && (
+        <div className="identity-conflict-banner" role="alertdialog" aria-label="Konflik kunci E2EE">
+          <div className="identity-conflict-copy">
+            <strong>Kunci akun {identityConflict.username} terakhir diubah dari perangkat lain.</strong>
+            <span>
+              Pesan lama yang dienkripsi dengan kunci perangkat sebelumnya tidak akan dapat dibuka di sini,
+              dan lawan bicara akan diminta memverifikasi ulang. Gunakan kunci perangkat ini?
+            </span>
+          </div>
+          <button type="button" className="identity-conflict-primary" onClick={confirmDeviceIdentity}>
+            Ya, gunakan kunci perangkat ini
+          </button>
+          <button type="button" onClick={() => onLogout?.()}>Keluar</button>
+        </div>
+      )}
       {notice && <div className="chat-toast" role="status">{notice}</div>}
       {activeSidePanel && (
         <>

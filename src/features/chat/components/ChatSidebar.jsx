@@ -4,6 +4,64 @@ import ChatIcon from './ChatIcon'
 import { ContactsList } from '../../contact'
 import { ProfileAvatar } from '../../profile'
 
+function getChatPreview(chat) {
+  if (Array.isArray(chat?.messages) && chat.messages.length > 0) {
+    const lastMessage = chat.messages[chat.messages.length - 1]
+    if (lastMessage) {
+      if (lastMessage.deleted_at || lastMessage.is_deleted) {
+        return 'Pesan telah dihapus'
+      }
+      const text = lastMessage.text ?? lastMessage.body
+      if (typeof text === 'string' && text.trim()) {
+        return text
+      }
+      if (Array.isArray(lastMessage.attachments) && lastMessage.attachments.length > 0) {
+        return lastMessage.attachments[0]?.name || 'Lampiran'
+      }
+      if (lastMessage.decryptFailed) {
+        return lastMessage.decryptError || 'Pesan terenkripsi'
+      }
+    }
+  }
+
+  const lastMsg = chat?.last_message || chat?.lastMessage || chat?.latest_message
+  if (lastMsg && typeof lastMsg === 'object') {
+    if (lastMsg.deleted_at || lastMsg.is_deleted) {
+      return 'Pesan telah dihapus'
+    }
+    const text = lastMsg.text ?? lastMsg.body ?? lastMsg.message ?? lastMsg.content
+    if (typeof text === 'string' && text.trim()) {
+      return text
+    }
+    if (Array.isArray(lastMsg.attachments) && lastMsg.attachments.length > 0) {
+      return lastMsg.attachments[0]?.name || 'Lampiran'
+    }
+  }
+
+  if (typeof chat?.last_message_text === 'string' && chat.last_message_text.trim()) {
+    return chat.last_message_text
+  }
+  if (typeof chat?.last_message_body === 'string' && chat.last_message_body.trim()) {
+    return chat.last_message_body
+  }
+
+  if (chat?.preview) {
+    return chat.preview
+  }
+
+  return 'Belum ada pesan'
+}
+
+function getChatTime(chat) {
+  if (Array.isArray(chat?.messages) && chat.messages.length > 0) {
+    const lastMessage = chat.messages[chat.messages.length - 1]
+    if (lastMessage?.time) {
+      return lastMessage.time
+    }
+  }
+  return chat?.time || ''
+}
+
 function ChatSidebar({
   chats,
   contacts,
@@ -215,23 +273,39 @@ function ChatSidebar({
               <span className="filter-count">{archivedChats.length}</span>
             </div>
             <div className="conversation-list">
-              {filteredChats.map((chat) => (
-                <div className="archived-conversation-item" key={chat.id}>
-                  <ChatAvatar chat={chat} />
-                  <span className="conversation-copy">
-                    <span className="conversation-topline"><strong>{chat.name}</strong></span>
-                    <span className="conversation-bottomline"><span>{chat.preview}</span></span>
-                  </span>
-                  <button
-                    className="restore-chat-button"
-                    type="button"
-                    onClick={() => onRestoreChat(chat.id)}
-                    aria-label={`Kembalikan percakapan ${chat.name}`}
-                  >
-                    Kembalikan
-                  </button>
-                </div>
-              ))}
+              {filteredChats.map((chat) => {
+                const previewText = getChatPreview(chat)
+                const isEncryptedNotice = previewText === 'Pesan terenkripsi'
+                return (
+                  <div className="archived-conversation-item" key={chat.id}>
+                    <ChatAvatar chat={chat} />
+                    <span className="conversation-copy">
+                      <span className="conversation-topline"><strong>{chat.name}</strong></span>
+                      <span className="conversation-bottomline">
+                        <span>
+                          {isEncryptedNotice && (
+                            <ChatIcon
+                              name="lock"
+                              size={11}
+                              className="lock-icon"
+                              style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 4 }}
+                            />
+                          )}
+                          {previewText}
+                        </span>
+                      </span>
+                    </span>
+                    <button
+                      className="restore-chat-button"
+                      type="button"
+                      onClick={() => onRestoreChat(chat.id)}
+                      aria-label={`Kembalikan percakapan ${chat.name}`}
+                    >
+                      Kembalikan
+                    </button>
+                  </div>
+                )
+              })}
               {filteredChats.length === 0 && (
                 <p className="empty-state">{archivedChats.length ? 'Arsip tidak ditemukan.' : 'Belum ada percakapan yang diarsipkan.'}</p>
               )}
@@ -268,25 +342,39 @@ function ChatSidebar({
             </div>
 
             <div className="conversation-list">
-              {filteredChats.map((chat) => (
-                <button
-                  key={chat.id}
-                  className={`conversation-item${activeId === chat.id ? ' selected' : ''}`}
-                  onClick={() => onSelectChat(chat.id)}
-                >
-                  <ChatAvatar chat={chat} />
-                  <span className="conversation-copy">
-                    <span className="conversation-topline">
-                      <strong>{chat.name}</strong>
-                      <time>{chat.time}</time>
+              {filteredChats.map((chat) => {
+                const previewText = getChatPreview(chat)
+                const isEncryptedNotice = previewText === 'Pesan terenkripsi'
+                return (
+                  <button
+                    key={chat.id}
+                    className={`conversation-item${activeId === chat.id ? ' selected' : ''}`}
+                    onClick={() => onSelectChat(chat.id)}
+                  >
+                    <ChatAvatar chat={chat} />
+                    <span className="conversation-copy">
+                      <span className="conversation-topline">
+                        <strong>{chat.name}</strong>
+                        <time>{getChatTime(chat)}</time>
+                      </span>
+                      <span className="conversation-bottomline">
+                        <span>
+                          {isEncryptedNotice && (
+                            <ChatIcon
+                              name="lock"
+                              size={11}
+                              className="lock-icon"
+                              style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 4 }}
+                            />
+                          )}
+                          {previewText}
+                        </span>
+                        {chat.unread > 0 && <span className="unread-count">{chat.unread}</span>}
+                      </span>
                     </span>
-                    <span className="conversation-bottomline">
-                      <span>{chat.preview}</span>
-                      {chat.unread > 0 && <span className="unread-count">{chat.unread}</span>}
-                    </span>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
               {filteredChats.length === 0 && (
                 <p className="empty-state">Tidak ada percakapan yang cocok.</p>
               )}

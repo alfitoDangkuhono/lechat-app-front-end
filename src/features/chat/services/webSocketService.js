@@ -14,7 +14,7 @@ function getWebSocketUrl() {
   return apiUrl.toString()
 }
 
-export function connectWebSocket({ conversationId, onEvent, onStatus }) {
+export function connectWebSocket({ conversationId, onEvent, onEventError, onStatus }) {
   let socket = null
   let disposed = false
   let joined = false
@@ -110,7 +110,9 @@ export function connectWebSocket({ conversationId, onEvent, onStatus }) {
         onStatus?.('connected')
       }
 
-      onEvent?.(event)
+      Promise.resolve(onEvent?.(event)).catch((error) => {
+        onEventError?.(error)
+      })
     }
 
     socket.onerror = () => {
