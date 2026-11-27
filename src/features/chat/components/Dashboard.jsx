@@ -16,11 +16,17 @@ import { chatService } from '../services/chatService'
 import { connectWebSocket } from '../services/webSocketService'
 import {
   checkIdentityStatus,
+  clearGroupKeyCache,
+  createAndPublishGroupKey,
   debugDirectMessage,
   decryptDirectMessage,
+  decryptGroupMessage,
   deleteEncryptedMessages,
   encryptDirectMessage,
+  encryptGroupMessage,
+  getOrFetchGroupKey,
   publishIdentity,
+  rewrapGroupKeyForMember,
   saveEncryptedMessage,
   trustPeerKey,
 } from '../services/e2eeService'
@@ -114,7 +120,62 @@ async function decodeMessages(chat, rawMessages, currentUsername) {
 
   for (const rawMessage of rawMessages) {
     if (chat.status === 'group') {
-      messages.push(chatService.mapMessage({ ...rawMessage, security: 'legacy' }))
+      if (Number(rawMessage.encryption_version) !== 1) {
+        messages.push(chatService.mapMessage({ ...rawMessage, security: 'legacy' }))
+        continue
+      }
+
+      if (rawMessage.deleted_at || rawMessage.is_deleted) {
+        messages.push({
+          ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        })
+        continue
+      }
+
+      if (typeof rawMessage.ciphertext !== 'string' || !rawMessage.ciphertext
+        || typeof rawMessage.iv !== 'string' || !rawMessage.iv) {
+        messages.push({
+          ...chatService.mapMessage({ ...rawMessage, body: '', text: '', security: 'e2ee' }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+          decryptFailed: true,
+          decryptError: 'Isi pesan terenkripsi grup tidak lengkap.',
+        })
+        continue
+      }
+
+      try {
+        const text = await decryptGroupMessage({
+          message: rawMessage,
+          conversationId: chat.id,
+          currentUsername,
+        })
+        const mappedMessage = chatService.mapMessage({
+          ...rawMessage,
+          body: text,
+          text,
+          security: 'e2ee',
+        })
+        messages.push({
+          ...mappedMessage,
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+        })
+        if (rawMessage.from_username !== currentUsername && rawMessage.id !== undefined) {
+          acknowledgedIds.push(rawMessage.id)
+        }
+      } catch (error) {
+        messages.push({
+          ...chatService.mapMessage({
+            ...rawMessage,
+            body: '',
+            text: '',
+            security: 'e2ee',
+          }),
+          from: rawMessage.from_username === currentUsername ? 'me' : 'them',
+          decryptFailed: true,
+          decryptError: error.message || 'Pesan grup terenkripsi tidak dapat dibuka di perangkat ini.',
+        })
+      }
       continue
     }
 
@@ -265,6 +326,7 @@ function Dashboard({ onLogout }) {
   const [securityWarning, setSecurityWarning] = useState(null)
   const [identityConflict, setIdentityConflict] = useState(null)
   const [keyTrustRevision, setKeyTrustRevision] = useState(0)
+  const [groupKeyRefreshRev, setGroupKeyRefreshRev] = useState(0)
   const noticeTimer = useRef(null)
   const avatarRefreshPendingRef = useRef(false)
   const socketRef = useRef(null)
@@ -877,6 +939,41 @@ function Dashboard({ onLogout }) {
           return
         }
 
+        if (event.type === 'group_key.created') {
+          const keyConversationId = event.conversation_id
+            ?? event.data?.conversation_id
+            ?? activeId
+          const keyVersion = event.data?.key_version
+          if (!keyConversationId || !keyVersion || Number(keyVersion) < 1) return
+
+          // Kontrak §8: ambil wrapped key versi baru via REST lalu cache di perangkat.
+          getOrFetchGroupKey({
+            conversationId: keyConversationId,
+            keyVersion: Number(keyVersion),
+            currentUsername: currentUsernameRef.current,
+          })
+            .then((groupKey) => {
+              if (!groupKey) {
+                console.warn(
+                  `group_key.created: tidak ada kunci versi ${keyVersion} untuk account ini pada ${keyConversationId}.`,
+                )
+                return
+              }
+              // Kunci versi baru sudah ter-cache. Segarkan riwayat agar pesan yang
+              // tadinya gagal didekripsi ikut ter-render.
+              if (activeId !== null && String(activeId) === String(keyConversationId)) {
+                setGroupKeyRefreshRev((rev) => rev + 1)
+              }
+            })
+            .catch((error) => {
+              if (error?.response?.status === 403) {
+                clearGroupKeyCache(currentUsernameRef.current, keyConversationId).catch(() => {})
+              }
+              console.warn('Menarik kunci grup setelah group_key.created gagal:', error?.message ?? error)
+            })
+          return
+        }
+
         if (event.type === 'error') {
           showNotice(friendlyWebSocketError(event.error))
           markPendingMessagesFailed()
@@ -918,15 +1015,24 @@ function Dashboard({ onLogout }) {
         if (peerWarning) setSecurityWarning(peerWarning)
         const items = decodedItems
         setPagination((current) => ({ ...current, [activeId]: page.nextBeforeId }))
-        setChats((current) => current.map((chat) => (
-          String(chat.id) === String(activeId)
-            ? {
-              ...chat,
-              messages: mergeMessageLists(items, chat.messages),
-              unread: 0,
-            }
-            : chat
-        )))
+        setChats((current) => current.map((chat) => {
+          if (String(chat.id) !== String(activeId)) return chat
+          const merged = mergeMessageLists(items, chat.messages)
+          const lastMsg = merged[merged.length - 1]
+          const lastPreview = lastMsg
+            ? (lastMsg.deleted_at || lastMsg.is_deleted
+              ? 'Pesan telah dihapus'
+              : lastMsg.text || lastMsg.body || (lastMsg.decryptFailed ? 'Pesan terenkripsi' : chat.preview))
+            : chat.preview
+          const lastTime = lastMsg?.time || chat.time
+          return {
+            ...chat,
+            messages: merged,
+            preview: lastPreview,
+            time: lastTime,
+            unread: 0,
+          }
+        }))
         const lastIncomingMessage = [...items].reverse()
           .find((item) => item.from === 'them')
         if (lastIncomingMessage) {
@@ -956,6 +1062,7 @@ function Dashboard({ onLogout }) {
     currentUsername,
     isLoading,
     keyTrustRevision,
+    groupKeyRefreshRev,
   ])
 
   useEffect(() => {
@@ -1052,6 +1159,19 @@ function Dashboard({ onLogout }) {
       setChats((current) => created
         ? [conversation, ...current]
         : current.map((chat) => chat.id === conversation.id ? conversation : chat))
+      if (details.type === 'group' && created && currentUsername) {
+        try {
+          await createAndPublishGroupKey({
+            conversationId: conversation.id,
+            keyVersion: 1,
+            currentUsername,
+            members: (details.memberIds || []).map((id) => ({ id })),
+          })
+        } catch (err) {
+          console.warn('Inisialisasi kunci grup baru dilewati:', err?.message ?? err)
+          showNotice(`Grup dibuat, tetapi kunci E2EE belum terpasang: ${err?.message ?? 'kesalahan tidak diketahui'}. Buat ulang grup setelah semua anggota membuka Lechat sekali; tanpa kunci, pesan grup tidak dapat dikirim.`)
+        }
+      }
       setActiveId(conversation.id)
       setActiveView('chats')
       setFilter('Semua')
@@ -1118,7 +1238,22 @@ function Dashboard({ onLogout }) {
     if (!activeChat || activeChat.status !== 'group') return
     try {
       await chatService.inviteToGroup(activeChat.id, userId)
-      showNotice('Undangan grup berhasil dikirim.')
+      // Kontrak §5.2: bungkus ulang versi kunci aktif untuk anggota baru supaya
+      // anggota baru dapat mengambil kunci via GET /keys/me dan ikut bertukar pesan.
+      rewrapGroupKeyForMember({
+        conversationId: activeChat.id,
+        currentUsername,
+        newUserId: userId,
+      })
+        .then((result) => {
+          showNotice(result
+            ? 'Undangan grup terkirim dan kunci grup dibagikan ke anggota baru.'
+            : 'Undangan grup terkirim. (Kunci grup akan dibagikan saat anggota bertukar pesan.)')
+        })
+        .catch((error) => {
+          console.warn('Rewrap kunci grup untuk anggota baru gagal:', error?.message ?? error)
+          showNotice('Undangan grup terkirim, tetapi kunci grup belum dibagikan ke anggota baru.')
+        })
       return true
     } catch (error) {
       if (error.response?.status === 409) {
@@ -1160,6 +1295,35 @@ function Dashboard({ onLogout }) {
     }
   }
 
+  async function ensureGroupKeyInitialized() {
+    if (!activeChat || activeChat.status !== 'group') return false
+
+    // Jangan timpa grup yang sudah aktif E2EE: cek riwayat terenkripsi
+    // di server dan di state lokal. Jika ada, biarkan error asli tampil.
+    const hasEncryptedServer = await chatService.conversationHasEncryptedMessages(activeChat.id)
+    const hasEncryptedLocal = activeChat.messages.some((item) => Number(item.encryption_version) === 1)
+    if (hasEncryptedServer || hasEncryptedLocal) return false
+
+    const members = groupMemberState?.conversationId === activeChat.id
+      && groupMemberState?.members?.length
+      ? groupMemberState.members
+      : await chatService.listGroupMembers(activeChat.id).catch(() => [])
+    try {
+      await createAndPublishGroupKey({
+        conversationId: activeChat.id,
+        keyVersion: 1,
+        currentUsername,
+        members,
+      })
+      showNotice('Enkripsi end-to-end grup berhasil diaktifkan. Pesan berikutnya akan terenkripsi.')
+      return true
+    } catch (error) {
+      console.warn('Mengaktifkan E2EE grup gagal:', error?.message ?? error)
+      showNotice(`Enkripsi grup belum berhasil diaktifkan: ${error?.message ?? 'kesalahan tidak diketahui'}. Coba lagi setelah semua anggota membuka Lechat sekali.`)
+      return false
+    }
+  }
+
   async function sendMessage(event, attachments = [], replyingTo = null) {
     event.preventDefault()
     const text = message.trim()
@@ -1183,7 +1347,28 @@ function Dashboard({ onLogout }) {
       ...(replyingTo?.id ? { reply_to_message_id: replyingTo.id } : {}),
     }
     if (activeChat.status === 'group') {
-      frame.body = text
+      let encrypted
+      try {
+        encrypted = await encryptGroupMessage({
+          text,
+          conversationId: activeId,
+          fromUsername: currentUsername,
+        })
+      } catch (error) {
+        // Kontrak §4.1: jika kunci belum ada karena grup fresh/legacy (belum
+        // ada pesan terenkripsi), aktifkan E2EE lalu kirim ulang. Grup yang
+        // sudah aktif E2EE dibiarkan error (tidak menimpa kunci).
+        if (error?.code === 'group_key_unavailable' && await ensureGroupKeyInitialized()) {
+          encrypted = await encryptGroupMessage({
+            text,
+            conversationId: activeId,
+            fromUsername: currentUsername,
+          })
+        } else {
+          throw error
+        }
+      }
+      Object.assign(frame, encrypted)
     } else {
       if (!currentUsername || !activeChat.peerUsername) {
         throw new Error('Username Anda atau kontak belum tersedia untuk menyiapkan E2EE.')
@@ -1224,6 +1409,7 @@ function Dashboard({ onLogout }) {
             text,
             time,
             receiptStatus: 'sent',
+            security: frame.encryption_version === 1 ? 'e2ee' : 'legacy',
             ...(replyingTo ? {
               reply_to: {
                 id: replyingTo.id,

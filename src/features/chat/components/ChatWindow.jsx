@@ -153,11 +153,7 @@ function ChatWindow({
         onAvatarImageError={onAvatarImageError}
       />
 
-      {chat.status === 'group' ? (
-        <div className="chat-security-banner is-warning" role="status">
-          Chat grup belum terenkripsi end-to-end. Pesan grup masih dapat dibaca oleh server.
-        </div>
-      ) : securityWarning ? (
+      {securityWarning && (
         <div className="chat-security-banner is-warning" role="alert">
           <strong>
             {securityWarning.changed
@@ -167,10 +163,6 @@ function ChatWindow({
           <span>Bandingkan safety number berikut melalui kanal tepercaya sebelum mempercayai kunci ini:</span>
           <code>{securityWarning.fingerprint}</code>
           <button type="button" onClick={onTrustPeerKey}>Saya sudah memverifikasi safety number</button>
-        </div>
-      ) : (
-        <div className="chat-security-banner" role="status">
-          Pesan direct baru dienkripsi end-to-end di perangkat ini. Verifikasi identitas kontak sebelum berbagi informasi sensitif.
         </div>
       )}
 
@@ -258,7 +250,7 @@ function ChatWindow({
                               <span className="message-author">{senderAvatar.username}</span>
                           )}
                           <div className="message-bubble-content">
-                            {item.security === 'legacy' && chat.status !== 'group' && (
+                            {item.security === 'legacy' && (
                               <small className="message-security-legacy">Pesan lama — tidak terenkripsi</small>
                             )}
                             {item.reply_to && (

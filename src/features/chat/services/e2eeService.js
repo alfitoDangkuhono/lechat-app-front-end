@@ -1,18 +1,55 @@
 import api from '../../../services/api'
+import { getAuthToken } from '../../auth/services/authTokenService'
 
 const DATABASE_NAME = 'lechat-e2ee'
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const IDENTITY_STORE = 'identityKeys'
 const TRUST_STORE = 'trustedPeerKeys'
 const MESSAGE_STORE = 'encryptedMessages'
+const GROUP_KEY_STORE = 'groupKeys'
 const IDENTITY_PROMISES = new Map()
 const PUBLISHED_IDENTITY_PROMISES = new Map()
 const IDENTITY_CONFLICTS = new Map()
 const SESSION_KEYS = new Map()
+const GROUP_KEYS = new Map()
 const PEER_KEY_STATUS_CACHE = new Map()
 const HKDF_SALT = new Uint8Array(32)
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
+const GROUP_KEY_UPLOAD_LIMIT = 10
+const GROUP_KEY_UPLOAD_WINDOW_MS = 60_000
+const GROUP_KEY_UPLOADS = []
+
+function assertGroupKeyUploadRateLimit() {
+  const now = Date.now()
+  while (GROUP_KEY_UPLOADS.length && now - GROUP_KEY_UPLOADS[0] >= GROUP_KEY_UPLOAD_WINDOW_MS) {
+    GROUP_KEY_UPLOADS.shift()
+  }
+  if (GROUP_KEY_UPLOADS.length >= GROUP_KEY_UPLOAD_LIMIT) {
+    const retryIn = Math.max(1, Math.ceil(
+      (GROUP_KEY_UPLOAD_WINDOW_MS - (now - GROUP_KEY_UPLOADS[0])) / 1000,
+    ))
+    throw new Error(`Terlalu banyak upload kunci grup. Tunggu ${retryIn} detik lalu coba lagi.`)
+  }
+}
+
+function recordGroupKeyUpload() {
+  GROUP_KEY_UPLOADS.push(Date.now())
+}
+
+function getCurrentUserIdFromToken() {
+  const token = getAuthToken()
+  if (!token) return null
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const base64Payload = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const decoded = JSON.parse(atob(base64Payload.padEnd(Math.ceil(base64Payload.length / 4) * 4, '=')))
+    return decoded.sub ?? decoded.user_id ?? decoded.id ?? null
+  } catch {
+    return null
+  }
+}
 
 function openDatabase() {
   if (!globalThis.indexedDB) {
@@ -31,6 +68,9 @@ function openDatabase() {
       }
       if (!database.objectStoreNames.contains(MESSAGE_STORE)) {
         database.createObjectStore(MESSAGE_STORE, { keyPath: 'key' })
+      }
+      if (!database.objectStoreNames.contains(GROUP_KEY_STORE)) {
+        database.createObjectStore(GROUP_KEY_STORE, { keyPath: 'key' })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -623,5 +663,491 @@ export async function deleteEncryptedMessages(username, conversationId, messageI
     await transactionResult(transaction)
   } finally {
     database.close()
+  }
+}
+
+async function fetchUserPublicKey(userId) {
+  const normalizedId = normalizeUserId(userId)
+  const response = await api.get(`/users/${normalizedId}/key`)
+  const data = response.data?.data ?? response.data
+  const publicKey = data?.public_key
+  validatePublicKey(publicKey)
+  return {
+    userId: normalizedId,
+    publicKey,
+    updatedAt: data?.updated_at ?? null,
+  }
+}
+
+async function saveGroupKeyRecord(account, conversationId, keyVersion, rawKeyBase64) {
+  const database = await openDatabase()
+  try {
+    const transaction = database.transaction(GROUP_KEY_STORE, 'readwrite')
+    transaction.objectStore(GROUP_KEY_STORE).put({
+      key: `${account}:${conversationId}:${keyVersion}`,
+      username: account,
+      conversationId: String(conversationId),
+      keyVersion: Number(keyVersion),
+      rawKey: rawKeyBase64,
+      createdAt: new Date().toISOString(),
+    })
+    await transactionResult(transaction)
+  } finally {
+    database.close()
+  }
+}
+
+async function getGroupKeyRecord(account, conversationId, keyVersion) {
+  const database = await openDatabase()
+  try {
+    const transaction = database.transaction(GROUP_KEY_STORE, 'readonly')
+    const request = transaction.objectStore(GROUP_KEY_STORE).get(`${account}:${conversationId}:${keyVersion}`)
+    return await requestResult(request)
+  } finally {
+    database.close()
+  }
+}
+
+async function listGroupKeyVersions(account, conversationId) {
+  const database = await openDatabase()
+  try {
+    const transaction = database.transaction(GROUP_KEY_STORE, 'readonly')
+    const store = transaction.objectStore(GROUP_KEY_STORE)
+    const prefix = `${account}:${conversationId}:`
+    const versions = []
+    const request = store.openCursor()
+    await new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (cursor) {
+          if (String(cursor.key).startsWith(prefix)) {
+            versions.push(Number(cursor.value.keyVersion))
+          }
+          cursor.continue()
+        } else {
+          resolve()
+        }
+      }
+      request.onerror = () => reject(request.error ?? new Error('Gagal membaca versi kunci grup.'))
+    })
+    await transactionResult(transaction)
+    return versions.filter((value) => Number.isFinite(value))
+  } finally {
+    database.close()
+  }
+}
+
+export async function clearGroupKeyCache(username, conversationId) {
+  const account = normalizeUsername(username)
+  const convId = String(conversationId ?? '')
+  if (!convId) return
+
+  const prefix = `${account}:${convId}:`
+  for (const key of [...GROUP_KEYS.keys()]) {
+    if (key.startsWith(prefix)) GROUP_KEYS.delete(key)
+  }
+
+  const database = await openDatabase()
+  try {
+    const transaction = database.transaction(GROUP_KEY_STORE, 'readwrite')
+    const store = transaction.objectStore(GROUP_KEY_STORE)
+    const request = store.openCursor()
+    await new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (cursor) {
+          if (String(cursor.key).startsWith(prefix)) {
+            cursor.delete()
+          }
+          cursor.continue()
+        } else {
+          resolve()
+        }
+      }
+      request.onerror = () => reject(request.error ?? new Error('Gagal menghapus cache kunci grup.'))
+    })
+    await transactionResult(transaction)
+  } finally {
+    database.close()
+  }
+}
+
+async function wrapGroupKey({ ownIdentity, recipientPublicKey, rawKeyBytes, conversationId, keyVersion, recipientUserId }) {
+  // Backend (Go) menuntut user_id sebagai JSON number, bukan string.
+  const numericUserId = Number(recipientUserId)
+  const sessionKey = await deriveSessionKey(ownIdentity, recipientPublicKey)
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const aad = encoder.encode(`group-key:${conversationId}:${keyVersion}:${numericUserId}`)
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv,
+      additionalData: aad,
+      tagLength: 128,
+    },
+    sessionKey,
+    rawKeyBytes,
+  )
+  return {
+    user_id: numericUserId,
+    encrypted_key: toBase64(new Uint8Array(ciphertext)),
+    iv: toBase64(iv),
+  }
+}
+
+async function unwrapGroupKey({ ownIdentity, senderPublicKey, encryptedKeyBase64, ivBase64, conversationId, keyVersion, myUserId }) {
+  const sessionKey = await deriveSessionKey(ownIdentity, senderPublicKey)
+  const iv = fromBase64(ivBase64, 'group_key_iv')
+  if (iv.length !== 12) {
+    throw new Error(`IV kunci grup tidak valid (${iv.length} byte, seharusnya 12).`)
+  }
+  const ciphertext = fromBase64(encryptedKeyBase64, 'encrypted_group_key')
+  if (ciphertext.length !== 48) {
+    throw new Error(`Encrypted group key tidak valid (${ciphertext.length} byte, seharusnya 48).`)
+  }
+  try {
+    const rawKeyBytes = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv,
+        additionalData: encoder.encode(`group-key:${conversationId}:${keyVersion}:${myUserId}`),
+        tagLength: 128,
+      },
+      sessionKey,
+      ciphertext,
+    )
+    return new Uint8Array(rawKeyBytes)
+  } catch (error) {
+    // Fallback: AAD tanpa user id jika dikirim dengan format envelope umum
+    try {
+      const rawFallback = await crypto.subtle.decrypt(
+        {
+          name: 'AES-GCM',
+          iv,
+          additionalData: encoder.encode(`group-key:${conversationId}:${keyVersion}`),
+          tagLength: 128,
+        },
+        sessionKey,
+        ciphertext,
+      )
+      return new Uint8Array(rawFallback)
+    } catch {
+      throw error
+    }
+  }
+}
+
+async function fetchAndCacheGroupKey({ account, convId, version }) {
+  const query = version ? `?key_version=${encodeURIComponent(String(version))}` : ''
+  const response = await api.get(
+    `/conversations/${encodeURIComponent(convId)}/keys/me${query}`,
+  )
+  const data = response.data?.data ?? response.data
+  if (!data?.encrypted_key || !data?.iv) {
+    return null
+  }
+  const resolvedVersion = Number(data.key_version ?? version) || 1
+  const cacheKey = `${account}:${convId}:${resolvedVersion}`
+  if (GROUP_KEYS.has(cacheKey)) return GROUP_KEYS.get(cacheKey)
+
+  const identity = await ensureIdentityPublished(account)
+  const senderId = data.sender_id ?? data.sender_user_id
+  if (!senderId) {
+    throw new Error('Respons kunci grup tidak memiliki ID pengirim yang valid.')
+  }
+
+  const senderKeyInfo = await fetchUserPublicKey(senderId)
+  const myUserId = getCurrentUserIdFromToken()
+
+  const rawBytes = await unwrapGroupKey({
+    ownIdentity: identity,
+    senderPublicKey: senderKeyInfo.publicKey,
+    encryptedKeyBase64: data.encrypted_key,
+    ivBase64: data.iv,
+    conversationId: convId,
+    keyVersion: resolvedVersion,
+    myUserId: myUserId ?? '',
+  })
+
+  const rawBase64 = toBase64(rawBytes)
+  await saveGroupKeyRecord(account, convId, resolvedVersion, rawBase64)
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    rawBytes,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+  GROUP_KEYS.set(cacheKey, key)
+  return key
+}
+
+export async function getOrFetchGroupKey({ conversationId, keyVersion = 1, currentUsername }) {
+  const account = normalizeUsername(currentUsername)
+  const convId = String(conversationId)
+  const version = Number(keyVersion) || 1
+  const cacheKey = `${account}:${convId}:${version}`
+
+  if (GROUP_KEYS.has(cacheKey)) {
+    return GROUP_KEYS.get(cacheKey)
+  }
+
+  const stored = await getGroupKeyRecord(account, convId, version)
+  if (stored?.rawKey) {
+    const rawBytes = fromBase64(stored.rawKey, 'stored_group_key')
+    const key = await crypto.subtle.importKey(
+      'raw',
+      rawBytes,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt'],
+    )
+    GROUP_KEYS.set(cacheKey, key)
+    return key
+  }
+
+  try {
+    return await fetchAndCacheGroupKey({ account, convId, version })
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      // Kontrak §5.3/§8: gagal mengambil kunci untuk user ini → bersihkan cache
+      // (bisa berarti kita sedang dikeluarkan atau belum di-wrap pada versi itu).
+      await clearGroupKeyCache(account, convId)
+      return null
+    }
+    if (error?.response?.status === 403) {
+      // Kontrak §5.3: bukan anggota percakapan lagi.
+      await clearGroupKeyCache(account, convId)
+    }
+    throw error
+  }
+}
+
+async function publishGroupKeyPayload(convId, keyVersion, wrappedKeys) {
+  assertGroupKeyUploadRateLimit()
+  const response = await api.post(`/conversations/${encodeURIComponent(convId)}/keys`, {
+    key_version: keyVersion,
+    keys: wrappedKeys,
+  })
+  recordGroupKeyUpload()
+  return response
+}
+
+export async function createAndPublishGroupKey({ conversationId, keyVersion = 1, currentUsername, members = [] }) {
+  const account = normalizeUsername(currentUsername)
+  const convId = String(conversationId)
+  const version = Number(keyVersion) || 1
+  const cacheKey = `${account}:${convId}:${version}`
+
+  const identity = await ensureIdentityPublished(account)
+  const myUserId = getCurrentUserIdFromToken()
+
+  // Generate 256-bit AES-GCM raw key (32 bytes)
+  const rawKeyBytes = crypto.getRandomValues(new Uint8Array(32))
+
+  const targetMemberIds = new Set()
+  if (myUserId !== null && myUserId !== undefined) {
+    targetMemberIds.add(String(myUserId))
+  }
+  for (const member of members) {
+    const id = member.user_id ?? member.userId ?? member.id
+    if (id !== undefined && id !== null) {
+      targetMemberIds.add(String(id))
+    }
+  }
+
+  const wrappedKeys = []
+  for (const rawMemberId of targetMemberIds) {
+    const memberId = normalizeUserId(rawMemberId)
+    try {
+      let memberPublicKey = null
+      if (myUserId !== null && String(memberId) === String(myUserId)) {
+        memberPublicKey = identity.publicKeyBase64
+      } else {
+        const info = await fetchUserPublicKey(memberId)
+        memberPublicKey = info.publicKey
+      }
+
+      if (memberPublicKey) {
+        const wrapped = await wrapGroupKey({
+          ownIdentity: identity,
+          recipientPublicKey: memberPublicKey,
+          rawKeyBytes,
+          conversationId: convId,
+          keyVersion: version,
+          recipientUserId: memberId,
+        })
+        wrappedKeys.push(wrapped)
+      }
+    } catch (error) {
+      console.warn(`Gagal membungkus kunci grup untuk pengguna ${memberId}:`, error.message)
+    }
+  }
+
+  if (wrappedKeys.length === 0) {
+    throw new Error('Tidak ada anggota grup yang memiliki kunci E2EE yang valid.')
+  }
+
+  await publishGroupKeyPayload(convId, version, wrappedKeys)
+
+  const rawBase64 = toBase64(rawKeyBytes)
+  await saveGroupKeyRecord(account, convId, version, rawBase64)
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    rawKeyBytes,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+  GROUP_KEYS.set(cacheKey, key)
+  return key
+}
+
+export async function rewrapGroupKeyForMember({ conversationId, currentUsername, newUserId }) {
+  const account = normalizeUsername(currentUsername)
+  const convId = String(conversationId)
+  const memberId = normalizeUserId(newUserId)
+
+  // Ambil key_version tertinggi yang sudah tersimpan lokal untuk percakapan ini.
+  const versions = await listGroupKeyVersions(account, convId)
+  if (!versions.length) return null
+  const highestVersion = Math.max(...versions)
+
+  const record = await getGroupKeyRecord(account, convId, highestVersion)
+  if (!record?.rawKey) return null
+
+  const identity = await ensureIdentityPublished(account)
+  const rawKeyBytes = fromBase64(record.rawKey, 'stored_group_key')
+
+  let recipientPublicKey
+  try {
+    const info = await fetchUserPublicKey(memberId)
+    recipientPublicKey = info.publicKey
+  } catch (error) {
+    console.warn(
+      `Tidak dapat mengambil kunci E2EE pengguna ${memberId} untuk re-wrap pada ${convId}:`,
+      error?.message ?? error,
+    )
+    return null
+  }
+
+  const wrapped = await wrapGroupKey({
+    ownIdentity: identity,
+    recipientPublicKey,
+    rawKeyBytes,
+    conversationId: convId,
+    keyVersion: highestVersion,
+    recipientUserId: memberId,
+  })
+
+  await publishGroupKeyPayload(convId, highestVersion, [wrapped])
+  return { key_version: highestVersion, user_id: Number(memberId) }
+}
+
+export async function encryptGroupMessage({ text, conversationId, keyVersion = 1, fromUsername }) {
+  const account = normalizeUsername(fromUsername)
+  const convId = String(conversationId)
+  const version = Number(keyVersion) || 1
+
+  let groupKey = await getOrFetchGroupKey({
+    conversationId: convId,
+    keyVersion: version,
+    currentUsername: account,
+  })
+
+  if (!groupKey) {
+    // Kontrak §4.1/§5.2: jangan menimpa versi aktif dengan kunci acak baru saat
+    // kunci belum dibungkus untuk kita. Coba ambil versi tertinggi untuk akun ini dulu.
+    groupKey = await fetchAndCacheGroupKey({ account, convId, version: undefined })
+      .catch(async (error) => {
+        if (error?.response?.status === 404 || error?.response?.status === 403) {
+          await clearGroupKeyCache(account, convId)
+          return null
+        }
+        throw error
+      })
+  }
+
+  if (!groupKey) {
+    const error = new Error(
+      'Kunci grup belum tersedia untuk akun Anda di percakapan ini. Minta anggota aktif untuk membungkus ulang kunci grup untuk Anda, lalu coba kirim lagi.',
+    )
+    error.code = 'group_key_unavailable'
+    throw error
+  }
+
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const aad = encoder.encode(`group:${convId}:${account}`)
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv,
+      additionalData: aad,
+      tagLength: 128,
+    },
+    groupKey,
+    encoder.encode(text),
+  )
+
+  return {
+    encryption_version: 1,
+    key_version: version,
+    ciphertext: toBase64(new Uint8Array(ciphertext)),
+    iv: toBase64(iv),
+  }
+}
+
+export async function decryptGroupMessage({ message, conversationId, currentUsername }) {
+  const account = normalizeUsername(currentUsername)
+  const convId = String(conversationId)
+  const version = Number(message.key_version) || 1
+
+  const groupKey = await getOrFetchGroupKey({
+    conversationId: convId,
+    keyVersion: version,
+    currentUsername: account,
+  })
+
+  if (!groupKey) {
+    throw new Error(`Kunci grup (versi ${version}) belum tersedia di perangkat ini.`)
+  }
+
+  const iv = fromBase64(message.iv, 'group_iv')
+  if (iv.length !== 12) {
+    throw new Error(`IV pesan grup tidak valid (${iv.length} byte, seharusnya 12).`)
+  }
+  const ciphertext = fromBase64(message.ciphertext, 'group_ciphertext')
+  const sender = message.from_username || message.author || ''
+
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv,
+        additionalData: encoder.encode(`group:${convId}:${sender}`),
+        tagLength: 128,
+      },
+      groupKey,
+      ciphertext,
+    )
+    return decoder.decode(plaintext)
+  } catch (error) {
+    try {
+      const plaintextFallback = await crypto.subtle.decrypt(
+        {
+          name: 'AES-GCM',
+          iv,
+          additionalData: encoder.encode(`group:${convId}`),
+          tagLength: 128,
+        },
+        groupKey,
+        ciphertext,
+      )
+      return decoder.decode(plaintextFallback)
+    } catch {
+      throw error
+    }
   }
 }
