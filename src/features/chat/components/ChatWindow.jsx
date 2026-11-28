@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import EmojiPicker from 'emoji-picker-react'
 import ChatAvatar from './ChatAvatar'
 import ChatHeader from './ChatHeader'
 import ChatIcon from './ChatIcon'
@@ -28,6 +29,7 @@ function ChatWindow({
   isLoadingOlder,
   isLoadingMessages,
   onLoadOlder,
+  theme,
 }) {
   const [attachments, setAttachments] = useState([])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -332,19 +334,15 @@ function ChatWindow({
           </button>
           {showEmojiPicker && (
             <div className="emoji-picker" aria-label="Pilih emoji">
-              {['😀', '😄', '😂', '🥰', '😊', '👍', '✨', '❤️'].map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  aria-label={`Tambahkan ${emoji}`}
-                  onClick={() => {
-                    onMessageChange(`${message}${emoji}`)
-                    setShowEmojiPicker(false)
-                  }}
-                >
-                  {emoji}
-                </button>
-              ))}
+              <EmojiPicker
+                colorScheme={theme}
+                width={320}
+                height={400}
+                previewConfig={{ showPreview: false }}
+                onEmojiClick={(emojiData) => {
+                  onMessageChange(`${message}${emojiData.emoji}`)
+                }}
+              />
             </div>
           )}
         </div>
