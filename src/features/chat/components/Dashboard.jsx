@@ -1575,6 +1575,7 @@ function Dashboard({ onLogout }) {
           : null}
         onTrustPeerKey={trustChangedPeerKey}
         onRetryMessage={retryPendingMessage}
+        theme={theme}
       />
       {identityConflict && (
         <div className="identity-conflict-banner" role="alertdialog" aria-label="Konflik kunci E2EE">

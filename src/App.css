@@ -1000,29 +1000,9 @@
 .emoji-picker {
   position: absolute;
   z-index: 3;
-  bottom: 44px;
+  bottom: calc(100% + 8px);
   left: 38px;
-  display: grid;
-  grid-template-columns: repeat(4, 34px);
-  gap: 3px;
-  padding: 7px;
-  background: #fff;
-  border: 1px solid #e8ebe5;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(35, 43, 34, 0.13);
 }
-
-.emoji-picker button {
-  width: 34px;
-  height: 34px;
-  font-size: 18px;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-}
-
-.emoji-picker button:hover { background: #f1f4ef; }
 .composer-attachments {
   display: flex;
   flex: 0 0 100%;
@@ -1346,6 +1326,23 @@
   top: 4px;
   right: 4px;
   display: block;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease, visibility 150ms ease;
+}
+
+.message-bubble:hover .message-actions,
+.message-actions:hover,
+.message-actions:focus-within {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (hover: none) {
+  .message-actions {
+    opacity: 1;
+    visibility: visible;
+  }
 }
 
 .message-actions-trigger {
@@ -2694,14 +2691,12 @@
 .app-shell[data-theme="dark"] .preview-dark { background: #222821; }
 .app-shell[data-theme="dark"] .theme-preview-card i { background: #e4e8e1; }
 .app-shell[data-theme="dark"] .theme-preview-card.preview-dark i { background: #454d45; }
-.app-shell[data-theme="dark"] .chat-actions-menu,
-.app-shell[data-theme="dark"] .emoji-picker {
+.app-shell[data-theme="dark"] .chat-actions-menu {
   background: #242c25;
   border-color: #3a433a;
 }
 .app-shell[data-theme="dark"] .chat-actions-menu button { color: #d2d9d0; }
-.app-shell[data-theme="dark"] .chat-actions-menu button:hover,
-.app-shell[data-theme="dark"] .emoji-picker button:hover { background: #303a31; }
+.app-shell[data-theme="dark"] .chat-actions-menu button:hover { background: #303a31; }
 .app-shell[data-theme="dark"] .chat-modal p { color: #9ca69b; }
 .app-shell[data-theme="dark"] .chat-empty-panel { color: #a0a89e; background: #202620; }
 .app-shell[data-theme="dark"] .empty-chat-back { color: #c1d6c1; background: #303b31; }
